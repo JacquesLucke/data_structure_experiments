@@ -1,0 +1,7 @@
+﻿BasedOnStyle : LLVM
+ColumnLimit : '80'
+UseTab : Never
+IndentWidth : 4
+AlwaysBreakTemplateDeclarations: 'true'
+AllowShortFunctionsOnASingleLine: 'Empty'
+AllowShortIfStatementsOnASingleLine: 'true'
