@@ -240,6 +240,9 @@ class Group {
     inline T *element_pointer(uint8_t position) const {
         return (T *)m_values + position;
     }
+
+    template <typename, typename>
+    friend class HashSet;
 };
 
 template <typename T, typename HashFunc>
@@ -394,5 +397,65 @@ class HashSet {
 
     void free_group_array(GroupType *groups) {
         std::free(groups);
+    }
+
+  public:
+    /*************** Iterator *******************/
+
+    class Iterator {
+      private:
+        const HashSet &m_set;
+        uint32_t m_group_index;
+        uint8_t m_position;
+
+      public:
+        Iterator(const HashSet &set, uint32_t group_index,
+                 uint8_t position)
+            : m_set(set), m_group_index(group_index),
+              m_position(position) {}
+
+        Iterator &operator++() {
+            m_position++;
+
+            while (true) {
+                GroupType &group = this->group();
+                if (m_position < group.size()) {
+                    break;
+                }
+                m_position = 0;
+                m_group_index++;
+                if (m_group_index >= m_set.group_amount()) {
+                    break;
+                }
+            }
+            return *this;
+        }
+
+        Iterator operator++(int) {
+            Iterator it = *this;
+            ++*this;
+            return it;
+        }
+
+        bool operator!=(const Iterator &it) const {
+            return m_group_index != it.m_group_index ||
+                   m_position != it.m_position;
+        }
+
+        const T &operator*() const {
+            return this->group().element_at(m_position);
+        }
+
+        GroupType &group() const {
+            return m_set.m_groups[m_group_index];
+        }
+    };
+
+    Iterator begin() const {
+        return Iterator(*this, 0, 0);
+    }
+
+    Iterator end() const {
+        return Iterator(*this, this->group_amount(), 0);
     }
 };

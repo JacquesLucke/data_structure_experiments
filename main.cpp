@@ -8,6 +8,15 @@ using IntSet = HashSet<int, HashBits32>;
 using StringSet = HashSet<std::string, HashString>;
 
 int main() {
-    StringSet set;
-    set.insert("Hello World");
+    IntSet set;
+    for (int i = 0; i < 100; i++) {
+        set.insert(i);
+    }
+
+    std::cout << "Values:" << std::endl;
+    for (int v : set) {
+        std::cout << v << " ";
+    }
+
+    std::cout << std::endl;
 }
