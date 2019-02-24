@@ -1,4 +1,5 @@
 #include "hash_set.hpp"
+#include "hashing.hpp"
 #include <benchmark/benchmark.h>
 
 uint32_t my_hash(const int &v) REAL_NOINLINE {
@@ -12,7 +13,7 @@ uint32_t my_hash(const int &v) REAL_NOINLINE {
     return value;
 }
 
-using IntSet = HashSet<int, my_hash>;
+using IntSet = HashSet<int, HashBits32>;
 
 static void BM_HashSet_InsertNew(benchmark::State &state) {
     IntSet set;
@@ -28,6 +29,6 @@ static void BM_HashSet_InsertNew(benchmark::State &state) {
                             state.range(0));
 }
 
-BENCHMARK(BM_HashSet_InsertNew)->Range(8, 8 << 20);
+BENCHMARK(BM_HashSet_InsertNew)->Range(8, 8 << 25);
 
 BENCHMARK_MAIN();

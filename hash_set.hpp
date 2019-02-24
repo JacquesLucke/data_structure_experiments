@@ -43,7 +43,7 @@ uint8_t count_bits(uint32_t n) {
     return count;
 }
 
-template <typename T, uint32_t Hash_fn(const T &value)>
+template <typename T, typename HashFunc>
 class Group {
     __m128i m_hash_bytes;
     uint16_t m_used_mask = 0;
@@ -111,15 +111,15 @@ class Group {
         return false;
     }
 
-    void split(Group &g0, Group &g1,
-               uint32_t decision_mask) NOINLINE {
+    void split(Group &g0, Group &g1, uint32_t decision_mask,
+               HashFunc &hash_fn) NOINLINE {
 
         Group *dst[2] = {&g0, &g1};
 
         for (uint position = 0; position < m_count;
              position++) {
             T &value = this->element_at(position);
-            uint32_t hash = Hash_fn(value);
+            uint32_t hash = hash_fn(value);
             uint8_t dst_index = (hash & decision_mask) != 0;
             dst[dst_index]->insert_new__no_check(
                 std::move(value), hash);
@@ -127,12 +127,12 @@ class Group {
         }
     }
 
-    void split_out(Group &dst,
-                   uint32_t decision_mask) NOINLINE {
+    void split_out(Group &dst, uint32_t decision_mask,
+                   HashFunc &hash_fn) NOINLINE {
         for (uint position = 0; position < m_count;
              position++) {
             T &value = this->element_at(position);
-            uint32_t hash = Hash_fn(value);
+            uint32_t hash = hash_fn(value);
             bool do_split = (hash & decision_mask) != 0;
             if (do_split) {
                 dst.insert_new__no_check(std::move(value),
@@ -257,18 +257,19 @@ class Group {
     }
 };
 
-template <typename T, uint32_t Hash_fn(const T &value)>
+template <typename T, typename HashFunc>
 class HashSet {
   private:
-    using GroupType = Group<T, Hash_fn>;
+    using GroupType = Group<T, HashFunc>;
 
     uint32_t m_group_mask = 0x0;
     uint32_t m_total_elements = 0;
     GroupType *m_groups;
     uint8_t m_size_exp = 0;
+    HashFunc m_hash_fn;
 
   public:
-    HashSet() {
+    HashSet() : m_hash_fn(HashFunc::get_new()) {
         m_groups =
             this->new_group_array(this->group_amount());
     }
@@ -329,7 +330,7 @@ class HashSet {
 
   private:
     inline uint32_t calc_hash(const T &value) const {
-        return Hash_fn(value);
+        return m_hash_fn(value);
     }
 
     inline uint32_t group_amount() const {
@@ -364,7 +365,8 @@ class HashSet {
             GroupType &g1 =
                 new_groups[this->group_amount() + i];
 
-            m_groups[i].split(g0, g1, decision_mask);
+            m_groups[i].split(g0, g1, decision_mask,
+                              m_hash_fn);
         }
 
         this->free_group_array(m_groups);
@@ -383,7 +385,7 @@ class HashSet {
         for (uint32_t i = 0; i < old_group_amount; i++) {
             GroupType &g0 = m_groups[i];
             GroupType &g1 = m_groups[i + old_group_amount];
-            g0.split_out(g1, decision_mask);
+            g0.split_out(g1, decision_mask, m_hash_fn);
         }
 
         m_size_exp++;
@@ -396,9 +398,10 @@ class HashSet {
         return groups;
     }
 
-    GroupType *realloc_group_array(GroupType *groups_orig,
-                                   uint32_t old_amount,
-                                   uint32_t amount) {
+    GroupType *
+    realloc_group_array(GroupType *groups_orig,
+                        uint32_t old_amount,
+                        uint32_t amount) REAL_NOINLINE {
         GroupType *groups = (GroupType *)std::realloc(
             groups_orig, amount * sizeof(GroupType));
 

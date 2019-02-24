@@ -1,4 +1,5 @@
 #include "hash_set.hpp"
+#include "hashing.hpp"
 #include "timeit.hpp"
 #include <iostream>
 #include <stdint.h>
@@ -15,14 +16,14 @@ uint32_t my_hash(const int &v) NOINLINE {
 }
 
 int main() {
-    HashSet<int, my_hash> set;
+    HashSet<int, HashBits32> set;
 
     set.insert_new(5);
     set.insert_new(7);
     set.insert_new(2);
     set.insert_new(3);
 
-    for (int i = 100; i < 1000; i++) {
+    for (int i = 100; i < 10000000; i++) {
         if (i % 4 == 0) {
             set.insert_new(i);
         }
@@ -32,6 +33,6 @@ int main() {
 
     for (uint i = 490; i < 510; i++) {
         bool contained = set.contains(i);
-        std::cout << i << ": " << contained << std::endl;
+        // std::cout << i << ": " << contained << std::endl;
     }
 }
