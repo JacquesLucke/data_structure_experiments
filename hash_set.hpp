@@ -56,6 +56,10 @@ class Group {
     /* can also be zero initialized */
     Group() = default;
 
+    static void Reset(Group &group) {
+        group.m_count = 0;
+    }
+
     ~Group() {
         for (uint8_t i = 0; i < m_count; i++) {
             this->element_pointer(i)->~T();
@@ -405,9 +409,9 @@ class HashSet {
         GroupType *groups = (GroupType *)std::realloc(
             groups_orig, amount * sizeof(GroupType));
 
-        std::memset(groups + old_amount, 0,
-                    sizeof(GroupType) *
-                        (amount - old_amount));
+        for (uint32_t i = old_amount; i < amount; i++) {
+            GroupType::Reset(groups[i]);
+        }
         return groups;
     }
 
