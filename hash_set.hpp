@@ -1,7 +1,9 @@
 #include "utils.hpp"
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <stdint.h>
+#include <type_traits>
 
 #include <smmintrin.h>
 
@@ -51,6 +53,7 @@ class Group {
     Group(Group &group) = delete;
 
   public:
+    /* can also be zero initialized */
     Group() = default;
 
     ~Group() {
@@ -101,7 +104,6 @@ class Group {
             if (this->position_contains_value(position,
                                               value)) {
                 this->remove_position(position);
-                this->decrease_size();
                 return true;
             }
             match_mask &= ~single_bit;
@@ -122,6 +124,22 @@ class Group {
             dst[dst_index]->insert_new__no_check(
                 std::move(value), hash);
             value.~T();
+        }
+    }
+
+    void split_out(Group &dst,
+                   uint32_t decision_mask) NOINLINE {
+        for (uint position = 0; position < m_count;
+             position++) {
+            T &value = this->element_at(position);
+            uint32_t hash = Hash_fn(value);
+            bool do_split = (hash & decision_mask) != 0;
+            if (do_split) {
+                dst.insert_new__no_check(std::move(value),
+                                         hash);
+                this->remove_position(position);
+                position--;
+            }
         }
     }
 
@@ -152,6 +170,7 @@ class Group {
             this->copy_hash_byte(last_position, position);
         }
         this->element_pointer(last_position)->~T();
+        this->decrease_size();
     }
 
     inline bool is_full() const {
@@ -246,7 +265,7 @@ class HashSet {
     uint32_t m_group_mask = 0x0;
     uint32_t m_total_elements = 0;
     GroupType *m_groups;
-    uint8_t m_size_exp = 1;
+    uint8_t m_size_exp = 0;
 
   public:
     HashSet() {
@@ -321,7 +340,20 @@ class HashSet {
         return hash & m_group_mask;
     }
 
-    void grow() NOINLINE {
+    float fullness() const {
+        return this->m_total_elements /
+               (float)(16 * this->group_amount());
+    }
+
+    void grow() {
+        if (std::is_trivial<T>::value) {
+            this->grow_trivially_relocateable();
+        } else {
+            this->grow_not_trivially_relocateable();
+        }
+    }
+
+    void grow_not_trivially_relocateable() NOINLINE {
         GroupType *new_groups =
             this->new_group_array(this->group_amount() * 2);
 
@@ -341,12 +373,38 @@ class HashSet {
         m_groups = new_groups;
     }
 
-    GroupType *new_group_array(uint32_t amount) {
-        GroupType *groups = (GroupType *)std::malloc(
-            amount * sizeof(GroupType));
-        for (uint32_t i = 0; i < amount; i++) {
-            new (groups + i) GroupType();
+    void grow_trivially_relocateable() NOINLINE {
+        uint32_t old_group_amount = this->group_amount();
+        uint32_t new_group_amount = old_group_amount * 2;
+        m_groups = this->realloc_group_array(
+            m_groups, old_group_amount, new_group_amount);
+
+        uint32_t decision_mask = 1 << m_size_exp;
+        for (uint32_t i = 0; i < old_group_amount; i++) {
+            GroupType &g0 = m_groups[i];
+            GroupType &g1 = m_groups[i + old_group_amount];
+            g0.split_out(g1, decision_mask);
         }
+
+        m_size_exp++;
+        m_group_mask = (1 << m_size_exp) - 1;
+    }
+
+    GroupType *new_group_array(uint32_t amount) {
+        GroupType *groups = (GroupType *)std::calloc(
+            amount, sizeof(GroupType));
+        return groups;
+    }
+
+    GroupType *realloc_group_array(GroupType *groups_orig,
+                                   uint32_t old_amount,
+                                   uint32_t amount) {
+        GroupType *groups = (GroupType *)std::realloc(
+            groups_orig, amount * sizeof(GroupType));
+
+        std::memset(groups + old_amount, 0,
+                    sizeof(GroupType) *
+                        (amount - old_amount));
         return groups;
     }
 
