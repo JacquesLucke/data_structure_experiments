@@ -1,0 +1,51 @@
+4 byte values:
+    - 4 per group:
+        used: 3 bit
+        hash bytes: 4 byte
+        values: 16 byte
+
+    - 8 per group:
+        used: 1 byte
+        used mask: 1 byte
+        hash bytes: 8 byte
+        values: 32 byte
+        => 42 byte
+
+    - 10 per group:
+        used: 1 byte
+        used mask: 2 byte
+        hash bytes: 10 byte
+        values: 40 byte
+        => 53 byte
+
+    - 12 per group:
+        used: 1 byte
+        used mask: 2 byte
+        hash bytes: 12 byte
+        values: 48 byte
+        => 63 byte
+
+8 byte values:
+    - 6 per group:
+        used: 1 byte
+        used mask: 1 byte
+        hash bytes: 6 byte
+        values: 48 byte
+        => 56 byte
+        + secondary hash: 6 byte
+        => 62 byte
+
+    - 7 per group:
+        used: 1 byte
+        used mask: 1 byte
+        hash bytes: 7 byte
+        values: 56 byte
+        => 65 byte
+
+12 byte values:
+    - 4 per group:
+        used: 1 byte
+        used mask: 1 byte
+        hash_bytes: 4 byte
+        values: 48 byte
+        => 54 byte
