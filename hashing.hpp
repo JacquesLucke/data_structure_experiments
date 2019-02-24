@@ -41,8 +41,13 @@ class HashString {
     HashString(HashBits32 hash_fn) : hash_fn(hash_fn) {}
 
     uint32_t operator()(const std::string &str) const {
+        return (*this)(str.c_str());
+    }
+
+    uint32_t operator()(const char *str) const {
         uint32_t hash = 5381;
-        for (char c : str) {
+        char c;
+        while ((c = *str++)) {
             hash = ((hash << 5) + hash) + c;
         }
         hash = hash_fn(hash);
