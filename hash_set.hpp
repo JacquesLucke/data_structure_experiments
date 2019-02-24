@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <stdint.h>
+#include <stdlib.h>
 #include <type_traits>
 
 #include <smmintrin.h>
@@ -45,10 +46,14 @@ uint8_t count_bits(uint32_t n) {
 
 template <typename T, typename HashFunc>
 class Group {
-    char m_hash_bytes[16];
-    uint16_t m_used_mask = 0;
+  public:
+    static const uint8_t s_max_size = 12;
+
+  private:
+    char m_hash_bytes[s_max_size];
+    uint16_t m_used_mask = 0x0;
     uint8_t m_count = 0;
-    char m_values[sizeof(T) * 16];
+    char m_values[sizeof(T) * s_max_size];
 
     Group(Group &group) = delete;
 
@@ -58,6 +63,7 @@ class Group {
 
     static void Reset(Group &group) {
         group.m_count = 0;
+        group.m_used_mask = 0x0;
     }
 
     ~Group() {
@@ -131,23 +137,6 @@ class Group {
         }
     }
 
-    void split_out(Group &dst,
-                   uint8_t decision_mask) NOINLINE {
-        for (uint8_t position = 0; position < m_count;
-             position++) {
-            T &value = this->element_at(position);
-            uint8_t hash_byte = m_hash_bytes[position];
-            bool do_split =
-                (hash_byte & decision_mask) != 0;
-            if (do_split) {
-                dst.insert_new__no_check(std::move(value),
-                                         hash_byte);
-                this->remove_position(position);
-                position--;
-            }
-        }
-    }
-
     void update_hash_bytes(HashFunc hash_fn,
                            uint8_t shift) {
         for (uint8_t position = 0; position < m_count;
@@ -189,7 +178,7 @@ class Group {
     }
 
     inline bool is_full() const {
-        return m_count == 16;
+        return m_count == s_max_size;
     }
 
     inline void increase_size() {
@@ -348,7 +337,8 @@ class HashSet {
 
     float fullness() const {
         return this->m_total_elements /
-               (float)(16 * this->group_amount());
+               (float)(GroupType::s_max_size *
+                       this->group_amount());
     }
 
     void grow() REAL_NOINLINE {
@@ -364,17 +354,6 @@ class HashSet {
         uint8_t decision_mask =
             1 << (m_size_exp - m_hash_byte_shift);
 
-        if (std::is_trivial<T>::value) {
-            this->grow_trivially_relocateable(
-                decision_mask);
-        } else {
-            this->grow_not_trivially_relocateable(
-                decision_mask);
-        }
-    }
-
-    void grow_not_trivially_relocateable(
-        uint8_t decision_mask) NOINLINE {
         GroupType *new_groups =
             this->new_group_array(this->group_amount() * 2);
 
@@ -393,40 +372,19 @@ class HashSet {
         m_groups = new_groups;
     }
 
-    void grow_trivially_relocateable(
-        uint8_t decision_mask) NOINLINE {
-        uint32_t old_group_amount = this->group_amount();
-        uint32_t new_group_amount = old_group_amount * 2;
-        m_groups = this->realloc_group_array(
-            m_groups, old_group_amount, new_group_amount);
-
-        for (uint32_t i = 0; i < old_group_amount; i++) {
-            GroupType &g0 = m_groups[i];
-            GroupType &g1 = m_groups[i + old_group_amount];
-            g0.split_out(g1, decision_mask);
-        }
-
-        m_size_exp++;
-        m_group_mask = (1 << m_size_exp) - 1;
-    }
-
     GroupType *new_group_array(uint32_t amount) {
-        GroupType *groups = (GroupType *)std::calloc(
-            amount, sizeof(GroupType));
+        GroupType *groups = (GroupType *)aligned_alloc(
+            64, amount * sizeof(GroupType));
+        this->reset_group_array(groups, amount);
+
         return groups;
     }
 
-    GroupType *
-    realloc_group_array(GroupType *groups_orig,
-                        uint32_t old_amount,
-                        uint32_t amount) REAL_NOINLINE {
-        GroupType *groups = (GroupType *)std::realloc(
-            groups_orig, amount * sizeof(GroupType));
-
-        for (uint32_t i = old_amount; i < amount; i++) {
+    void reset_group_array(GroupType *groups,
+                           uint32_t length) {
+        for (uint32_t i = 0; i < length; i++) {
             GroupType::Reset(groups[i]);
         }
-        return groups;
     }
 
     void free_group_array(GroupType *groups) {
