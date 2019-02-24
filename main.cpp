@@ -23,7 +23,7 @@ int main() {
     set.insert_new(2);
     set.insert_new(3);
 
-    for (int i = 100; i < 10000000; i++) {
+    for (int i = 100; i < 10000; i++) {
         if (i % 4 == 0) {
             set.insert_new(i);
         }
@@ -33,6 +33,6 @@ int main() {
 
     for (uint i = 490; i < 510; i++) {
         bool contained = set.contains(i);
-        // std::cout << i << ": " << contained << std::endl;
+        std::cout << i << ": " << contained << std::endl;
     }
 }
