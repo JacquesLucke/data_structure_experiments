@@ -26,7 +26,8 @@ class HashBits32 {
     }
 
     static HashBits32 get_new() {
-        std::uniform_int_distribution<> distr(1, prime);
-        return HashBits32(distr(eng), distr(eng));
+        return HashBits32(342342983, 12314123);
+        // std::uniform_int_distribution<> distr(1, prime);
+        // return HashBits32(distr(eng), distr(eng));
     }
 };
