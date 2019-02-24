@@ -53,6 +53,12 @@ class Group {
   public:
     Group() = default;
 
+    ~Group() {
+        for (uint8_t i = 0; i < m_count; i++) {
+            this->element_pointer(i)->~T();
+        }
+    }
+
     inline uint8_t size() const {
         return m_count;
     }
@@ -83,7 +89,7 @@ class Group {
         return false;
     }
 
-    void remove(const T &value, uint32_t hash) NOINLINE {
+    bool remove(const T &value, uint32_t hash) NOINLINE {
         uint8_t hash_byte = this->to_hash_byte(hash);
         uint16_t match_mask =
             this->get_hash_bytes_mask(hash_byte);
@@ -96,10 +102,11 @@ class Group {
                                               value)) {
                 this->remove_position(position);
                 this->decrease_size();
-                return;
+                return true;
             }
             match_mask &= ~single_bit;
         }
+        return false;
     }
 
     void split(Group &g0, Group &g1,
@@ -243,14 +250,29 @@ class HashSet {
 
   public:
     HashSet() {
-        std::cout << "Size of group: " << sizeof(GroupType)
-                  << std::endl;
         m_groups =
             this->new_group_array(this->group_amount());
     }
 
+    HashSet(std::initializer_list<T> values) : HashSet() {
+        for (T value : values) {
+            this->insert(value);
+        }
+    }
+
     inline uint32_t size() {
         return m_total_elements;
+    }
+
+    void insert(T &&value) {
+        T val = value;
+        this->insert(val);
+    }
+
+    void insert(T &value) {
+        if (!this->contains(value)) {
+            this->insert_new(value);
+        }
     }
 
     void insert_new(T &&value) {
@@ -282,8 +304,8 @@ class HashSet {
     void remove(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
         uint32_t index = this->group_index(hash);
-        m_groups[index].remove(value, hash);
-        m_total_elements--;
+        bool existed = m_groups[index].remove(value, hash);
+        if (existed) m_total_elements--;
     }
 
   private:

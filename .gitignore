@@ -1,2 +1,7 @@
 .vscode
 a.out
+CMakeFiles
+*.cmake
+Makefile
+CMakeCache.txt
+run_tests
