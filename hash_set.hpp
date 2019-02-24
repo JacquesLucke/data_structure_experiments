@@ -71,15 +71,14 @@ class Group {
     }
 
     inline bool try_insert_new(T &value,
-                               uint32_t hash) NOINLINE {
+                               uint8_t hash_byte) NOINLINE {
         if (this->is_full()) return false;
-        this->insert_new__no_check(value, hash);
+        this->insert_new__no_check(value, hash_byte);
         return true;
     }
 
     inline bool contains(const T &value,
-                         uint32_t hash) const NOINLINE {
-        uint8_t hash_byte = this->to_hash_byte(hash);
+                         uint8_t hash_byte) const NOINLINE {
         uint16_t match_mask =
             this->get_hash_bytes_mask(hash_byte);
 
@@ -96,8 +95,8 @@ class Group {
         return false;
     }
 
-    bool remove(const T &value, uint32_t hash) NOINLINE {
-        uint8_t hash_byte = this->to_hash_byte(hash);
+    bool remove(const T &value,
+                uint8_t hash_byte) NOINLINE {
         uint16_t match_mask =
             this->get_hash_bytes_mask(hash_byte);
 
@@ -115,52 +114,65 @@ class Group {
         return false;
     }
 
-    void split(Group &g0, Group &g1, uint32_t decision_mask,
-               HashFunc &hash_fn) NOINLINE {
+    void split(Group &g0, Group &g1,
+               uint8_t decision_mask) NOINLINE {
 
         Group *dst[2] = {&g0, &g1};
 
-        for (uint position = 0; position < m_count;
+        for (uint8_t position = 0; position < m_count;
              position++) {
             T &value = this->element_at(position);
-            uint32_t hash = hash_fn(value);
-            uint8_t dst_index = (hash & decision_mask) != 0;
+            uint8_t hash_byte = m_hash_bytes[position];
+            uint8_t dst_index =
+                (hash_byte & decision_mask) != 0;
             dst[dst_index]->insert_new__no_check(
-                std::move(value), hash);
+                std::move(value), hash_byte);
             value.~T();
         }
     }
 
-    void split_out(Group &dst, uint32_t decision_mask,
-                   HashFunc &hash_fn) NOINLINE {
-        for (uint position = 0; position < m_count;
+    void split_out(Group &dst,
+                   uint8_t decision_mask) NOINLINE {
+        for (uint8_t position = 0; position < m_count;
              position++) {
             T &value = this->element_at(position);
-            uint32_t hash = hash_fn(value);
-            bool do_split = (hash & decision_mask) != 0;
+            uint8_t hash_byte = m_hash_bytes[position];
+            bool do_split =
+                (hash_byte & decision_mask) != 0;
             if (do_split) {
                 dst.insert_new__no_check(std::move(value),
-                                         hash);
+                                         hash_byte);
                 this->remove_position(position);
                 position--;
             }
         }
     }
 
+    void update_hash_bytes(HashFunc hash_fn,
+                           uint8_t shift) {
+        for (uint8_t position = 0; position < m_count;
+             position++) {
+            T &value = this->element_at(position);
+            uint8_t hash_byte = hash_fn(value) >> shift;
+            m_hash_bytes[position] = hash_byte;
+        }
+    }
+
   private:
     inline void
-    insert_new__no_check(T &value, uint32_t hash) NOINLINE {
+    insert_new__no_check(T &value,
+                         uint8_t hash_byte) NOINLINE {
         uint8_t position = m_count;
-        m_hash_bytes[position] = this->to_hash_byte(hash);
+        m_hash_bytes[position] = hash_byte;
         this->store(position, value);
         this->increase_size();
     }
 
     inline void
     insert_new__no_check(T &&value,
-                         uint32_t hash) NOINLINE {
+                         uint8_t hash_byte) NOINLINE {
         uint8_t position = m_count;
-        m_hash_bytes[position] = this->to_hash_byte(hash);
+        m_hash_bytes[position] = hash_byte;
         this->store(position, value);
         this->increase_size();
     }
@@ -198,10 +210,6 @@ class Group {
             _mm_cmpeq_epi8(all_hash_bytes, cmp_hash);
         uint16_t bit_mask = _mm_movemask_epi8(byte_mask);
         return bit_mask & m_used_mask;
-    }
-
-    inline uint8_t to_hash_byte(uint32_t hash) const {
-        return hash >> 24;
     }
 
     inline uint8_t get_bit_position(uint16_t mask) const {
@@ -254,6 +262,7 @@ class HashSet {
     uint32_t m_total_elements = 0;
     GroupType *m_groups;
     uint8_t m_size_exp = 0;
+    uint8_t m_hash_byte_shift = 0;
     HashFunc m_hash_fn;
 
   public:
@@ -290,8 +299,9 @@ class HashSet {
 
     void insert_new(T &value) REAL_NOINLINE {
         uint32_t hash = this->calc_hash(value);
+        uint8_t hash_byte = this->to_hash_byte(hash);
         while (!m_groups[this->group_index(hash)]
-                    .try_insert_new(value, hash)) {
+                    .try_insert_new(value, hash_byte)) {
             this->grow();
         }
 
@@ -300,8 +310,9 @@ class HashSet {
 
     bool contains(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
+        uint8_t hash_byte = this->to_hash_byte(hash);
         return m_groups[this->group_index(hash)].contains(
-            value, hash);
+            value, hash_byte);
     }
 
     void remove(const T &&value) {
@@ -312,13 +323,19 @@ class HashSet {
     void remove(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
         uint32_t index = this->group_index(hash);
-        bool existed = m_groups[index].remove(value, hash);
+        uint8_t hash_byte = this->to_hash_byte(hash);
+        bool existed =
+            m_groups[index].remove(value, hash_byte);
         if (existed) m_total_elements--;
     }
 
   private:
     inline uint32_t calc_hash(const T &value) const {
         return m_hash_fn(value);
+    }
+
+    inline uint8_t to_hash_byte(uint32_t hash) const {
+        return hash >> m_hash_byte_shift;
     }
 
     inline uint32_t group_amount() const {
@@ -335,26 +352,39 @@ class HashSet {
     }
 
     void grow() REAL_NOINLINE {
+        if (m_size_exp % 3 == 0 && m_size_exp > 0) {
+            m_hash_byte_shift = m_size_exp;
+            for (uint32_t i = 0; i < this->group_amount();
+                 i++) {
+                m_groups[i].update_hash_bytes(
+                    m_hash_fn, m_hash_byte_shift);
+            }
+        }
+
+        uint8_t decision_mask =
+            1 << (m_size_exp - m_hash_byte_shift);
+
         if (std::is_trivial<T>::value) {
-            this->grow_trivially_relocateable();
+            this->grow_trivially_relocateable(
+                decision_mask);
         } else {
-            this->grow_not_trivially_relocateable();
+            this->grow_not_trivially_relocateable(
+                decision_mask);
         }
     }
 
-    void grow_not_trivially_relocateable() NOINLINE {
+    void grow_not_trivially_relocateable(
+        uint8_t decision_mask) NOINLINE {
         GroupType *new_groups =
             this->new_group_array(this->group_amount() * 2);
 
-        uint32_t decision_mask = 1 << m_size_exp;
         for (uint32_t i = 0; i < this->group_amount();
              i++) {
             GroupType &g0 = new_groups[i];
             GroupType &g1 =
                 new_groups[this->group_amount() + i];
 
-            m_groups[i].split(g0, g1, decision_mask,
-                              m_hash_fn);
+            m_groups[i].split(g0, g1, decision_mask);
         }
 
         this->free_group_array(m_groups);
@@ -363,17 +393,17 @@ class HashSet {
         m_groups = new_groups;
     }
 
-    void grow_trivially_relocateable() NOINLINE {
+    void grow_trivially_relocateable(
+        uint8_t decision_mask) NOINLINE {
         uint32_t old_group_amount = this->group_amount();
         uint32_t new_group_amount = old_group_amount * 2;
         m_groups = this->realloc_group_array(
             m_groups, old_group_amount, new_group_amount);
 
-        uint32_t decision_mask = 1 << m_size_exp;
         for (uint32_t i = 0; i < old_group_amount; i++) {
             GroupType &g0 = m_groups[i];
             GroupType &g1 = m_groups[i + old_group_amount];
-            g0.split_out(g1, decision_mask, m_hash_fn);
+            g0.split_out(g1, decision_mask);
         }
 
         m_size_exp++;
