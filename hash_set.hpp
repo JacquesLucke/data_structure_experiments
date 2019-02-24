@@ -288,20 +288,25 @@ class HashSet {
 
     void insert_new(T &value) REAL_NOINLINE {
         uint32_t hash = this->calc_hash(value);
-        uint8_t hash_byte = this->to_hash_byte(hash);
-        while (!m_groups[this->group_index(hash)]
-                    .try_insert_new(value, hash_byte)) {
+
+        while (true) {
+            uint8_t hash_byte = this->to_hash_byte(hash);
+            uint32_t index = this->group_index(hash);
+            GroupType &group = m_groups[index];
+            if (group.try_insert_new(value, hash_byte)) {
+                break;
+            }
             this->grow();
         }
-
         m_total_elements++;
     }
 
     bool contains(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
         uint8_t hash_byte = this->to_hash_byte(hash);
-        return m_groups[this->group_index(hash)].contains(
-            value, hash_byte);
+        uint32_t index = this->group_index(hash);
+        GroupType &group = m_groups[index];
+        return group.contains(value, hash_byte);
     }
 
     void remove(const T &&value) {
@@ -311,10 +316,10 @@ class HashSet {
 
     void remove(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
-        uint32_t index = this->group_index(hash);
         uint8_t hash_byte = this->to_hash_byte(hash);
-        bool existed =
-            m_groups[index].remove(value, hash_byte);
+        uint32_t index = this->group_index(hash);
+        GroupType &group = m_groups[index];
+        bool existed = group.remove(value, hash_byte);
         if (existed) m_total_elements--;
     }
 
