@@ -44,10 +44,10 @@ uint8_t count_bits(uint32_t n) {
     return count;
 }
 
-template <typename T, typename HashFunc>
+template <typename T, typename HashFunc, int N>
 class Group {
   public:
-    static const uint8_t s_max_size = 12;
+    static const uint8_t s_max_size = N;
 
   private:
     char m_hash_bytes[s_max_size];
@@ -248,7 +248,9 @@ class Group {
 template <typename T, typename HashFunc>
 class HashSet {
   private:
-    using GroupType = Group<T, HashFunc>;
+    using GroupType = typename std::conditional<
+        sizeof(T) == 4, Group<T, HashFunc, 12>,
+        Group<T, HashFunc, 6>>::type;
 
     uint32_t m_group_mask = 0x0;
     uint32_t m_total_elements = 0;
