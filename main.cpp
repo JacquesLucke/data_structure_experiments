@@ -3,7 +3,7 @@
 #include <iostream>
 #include <stdint.h>
 
-uint32_t my_hash(const int &v) {
+uint32_t my_hash(const int &v) NOINLINE {
     uint32_t value = v;
     value = ~value + (value << 15);
     value = value ^ (value >> 12);
@@ -17,17 +17,21 @@ uint32_t my_hash(const int &v) {
 int main() {
     HashSet<int, my_hash> set;
 
-    {
-        TIMEIT("test");
-        for (int i = 0; i < 10000; i++) {
+    set.insert_new(5);
+    set.insert_new(7);
+    set.insert_new(2);
+    set.insert_new(3);
+
+    for (int i = 100; i < 1000; i++) {
+        if (i % 4 == 0) {
             set.insert_new(i);
         }
     }
 
-    std::cout << "Size: " << (int)set.size() << std::endl;
+    set.remove(500);
 
-    for (int i = 0; i < 100; i++) {
-        // set.contains(i);
-        // std::cout << "Contains " << i << ": " <<  << std::endl;
+    for (uint i = 490; i < 510; i++) {
+        bool contained = set.contains(i);
+        std::cout << i << ": " << contained << std::endl;
     }
 }
