@@ -299,7 +299,7 @@ class HashSet {
         this->insert_new(val);
     }
 
-    void insert_new(T &value) NOINLINE {
+    void insert_new(T &value) REAL_NOINLINE {
         uint32_t hash = this->calc_hash(value);
         while (!m_groups[this->group_index(hash)]
                     .try_insert_new(value, hash)) {
@@ -345,7 +345,7 @@ class HashSet {
                (float)(16 * this->group_amount());
     }
 
-    void grow() {
+    void grow() REAL_NOINLINE {
         if (std::is_trivial<T>::value) {
             this->grow_trivially_relocateable();
         } else {
