@@ -45,7 +45,7 @@ uint8_t count_bits(uint32_t n) {
 
 template <typename T, typename HashFunc>
 class Group {
-    __m128i m_hash_bytes;
+    char m_hash_bytes[16];
     uint16_t m_used_mask = 0;
     uint8_t m_count = 0;
     char m_values[sizeof(T) * 16];
@@ -151,8 +151,7 @@ class Group {
     inline void
     insert_new__no_check(T &value, uint32_t hash) NOINLINE {
         uint8_t position = m_count;
-        uint8_t short_hash = this->to_hash_byte(hash);
-        this->set_hash_byte(position, short_hash);
+        m_hash_bytes[position] = this->to_hash_byte(hash);
         this->store(position, value);
         this->increase_size();
     }
@@ -161,8 +160,7 @@ class Group {
     insert_new__no_check(T &&value,
                          uint32_t hash) NOINLINE {
         uint8_t position = m_count;
-        uint8_t short_hash = this->to_hash_byte(hash);
-        this->set_hash_byte(position, short_hash);
+        m_hash_bytes[position] = this->to_hash_byte(hash);
         this->store(position, value);
         this->increase_size();
     }
@@ -171,7 +169,8 @@ class Group {
         uint8_t last_position = m_count - 1;
         if (position < last_position) {
             this->move_element(last_position, position);
-            this->copy_hash_byte(last_position, position);
+            m_hash_bytes[position] =
+                m_hash_bytes[last_position];
         }
         this->element_pointer(last_position)->~T();
         this->decrease_size();
@@ -194,8 +193,9 @@ class Group {
     inline uint16_t
     get_hash_bytes_mask(uint8_t short_hash) const {
         __m128i cmp_hash = _mm_set1_epi8(short_hash);
+        __m128i all_hash_bytes = *(__m128i *)m_hash_bytes;
         __m128i byte_mask =
-            _mm_cmpeq_epi8(m_hash_bytes, cmp_hash);
+            _mm_cmpeq_epi8(all_hash_bytes, cmp_hash);
         uint16_t bit_mask = _mm_movemask_epi8(byte_mask);
         return bit_mask & m_used_mask;
     }
@@ -242,22 +242,6 @@ class Group {
 
     inline T *element_pointer(uint8_t position) const {
         return (T *)m_values + position;
-    }
-
-    inline void set_hash_byte(uint8_t position,
-                              uint8_t hash_byte) const {
-        uint8_t *hash_bytes = this->hash_bytes_ptr();
-        hash_bytes[position] = hash_byte;
-    }
-
-    inline void copy_hash_byte(uint8_t src,
-                               uint dst) const {
-        uint8_t *hash_bytes = this->hash_bytes_ptr();
-        hash_bytes[dst] = hash_bytes[src];
-    }
-
-    inline uint8_t *hash_bytes_ptr() const {
-        return (uint8_t *)&m_hash_bytes;
     }
 };
 
