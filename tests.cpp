@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 using IntSet = HashSet<int, HashBits32>;
+using StringSet = HashSet<std::string, HashString>;
 
 TEST(HashSet, DefaultConstructor) {
     IntSet set;
@@ -103,6 +104,19 @@ TEST(HashSet, RemoveMany) {
     for (int i = 0; i < N; i++) {
         EXPECT_EQ(set.contains(i), (i % 5) != 0);
     }
+}
+
+TEST(HashSet, Strings) {
+    StringSet set = {"Where", "Who", "When"};
+    EXPECT_EQ(set.size(), 3);
+    EXPECT_TRUE(set.contains("Who"));
+    EXPECT_FALSE(set.contains("Hello"));
+
+    set.insert("Hello");
+    EXPECT_TRUE(set.contains("Hello"));
+
+    set.remove("Who");
+    EXPECT_FALSE(set.contains("Who"));
 }
 
 int main(int argc, char **argv) {

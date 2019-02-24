@@ -1,6 +1,7 @@
 #include "utils.hpp"
 #include <random>
 #include <stdint.h>
+#include <string>
 
 std::random_device rd;
 std::mt19937 eng(rd());
@@ -29,5 +30,26 @@ class HashBits32 {
         return HashBits32(342342983, 12314123);
         // std::uniform_int_distribution<> distr(1, prime);
         // return HashBits32(distr(eng), distr(eng));
+    }
+};
+
+class HashString {
+  private:
+    HashBits32 hash_fn;
+
+  public:
+    HashString(HashBits32 hash_fn) : hash_fn(hash_fn) {}
+
+    uint32_t operator()(const std::string &str) const {
+        uint32_t hash = 5381;
+        for (char c : str) {
+            hash = ((hash << 5) + hash) + c;
+        }
+        hash = hash_fn(hash);
+        return hash;
+    }
+
+    static HashString get_new() {
+        return HashString(HashBits32::get_new());
     }
 };
