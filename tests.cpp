@@ -90,7 +90,7 @@ TEST(HashSet, DoesNotContainAfterRemove) {
     EXPECT_FALSE(set.contains(2));
 }
 
-TEST(HashSet, InsertMany) {
+TEST(HashSet, InsertManyTimes) {
     IntSet set;
     int N = 1000;
     for (int i = 0; i < N; i += 4) {
@@ -101,7 +101,7 @@ TEST(HashSet, InsertMany) {
     }
 }
 
-TEST(HashSet, RemoveMany) {
+TEST(HashSet, RemoveManyTimes) {
     IntSet set;
     int N = 1000;
     for (int i = 0; i < N; i++) {
@@ -128,6 +128,17 @@ TEST(HashSet, Strings) {
 
     set.remove("Who");
     EXPECT_FALSE(set.contains("Who"));
+}
+
+TEST(HashSet, BuildFromVector) {
+    std::vector<int> values = {1, 2, 3, 4};
+    IntSet set(values);
+
+    EXPECT_TRUE(set.contains(1));
+    EXPECT_TRUE(set.contains(2));
+    EXPECT_TRUE(set.contains(3));
+    EXPECT_TRUE(set.contains(4));
+    EXPECT_FALSE(set.contains(5));
 }
 
 int main(int argc, char **argv) {

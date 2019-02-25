@@ -33,7 +33,7 @@ static void BM_HashSet_InsertNew(benchmark::State &state) {
 }
 
 static void
-BM_HashSet_InsertManyNew(benchmark::State &state) {
+BM_HashSet_BuildFromVector(benchmark::State &state) {
     IntSet set;
     for (auto _ : state) {
         state.PauseTiming();
@@ -43,7 +43,7 @@ BM_HashSet_InsertManyNew(benchmark::State &state) {
         for (int i = 0; i < state.range(0); i++) {
             values[i] = i;
         }
-        set.insert_many_new(values);
+        set = IntSet(values);
     }
     state.SetItemsProcessed(state.iterations() *
                             state.range(0));
@@ -51,6 +51,6 @@ BM_HashSet_InsertManyNew(benchmark::State &state) {
 
 BENCHMARK(BM_HashSet_Insert)->Range(8, 8 << 20);
 BENCHMARK(BM_HashSet_InsertNew)->Range(8, 8 << 20);
-BENCHMARK(BM_HashSet_InsertManyNew)->Range(8, 8 << 20);
+BENCHMARK(BM_HashSet_BuildFromVector)->Range(8, 8 << 20);
 
 BENCHMARK_MAIN();

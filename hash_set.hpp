@@ -1,57 +1,15 @@
+#pragma once
+
 #include "utils.hpp"
 #include <assert.h>
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
 #include <vector>
 
 #include <smmintrin.h>
-
-/* http://supertech.csail.mit.edu/papers/debruijn.pdf */
-
-inline uint8_t get_bit_identifier_32(uint32_t v) {
-    return ((uint32_t)(v * 0x07C4ACDD)) >> 27;
-}
-
-inline uint8_t get_bit_identifier_16(uint16_t v) {
-    return ((uint16_t)(v * 0x0F65)) >> 12;
-}
-
-inline uint8_t get_bit_index_16(uint16_t v) {
-    static const uint8_t table[16] = {0, 1, 11, 2,  14, 12,
-                                      8, 3, 15, 10, 13, 7,
-                                      9, 6, 5,  4};
-    uint8_t identifier = ((uint16_t)(v * 0x0F65)) >> 12;
-    uint8_t index = table[identifier];
-    return index;
-}
-
-inline uint8_t get_bit_identifier_8(uint8_t v) {
-    return ((uint8_t)(v * 0x1C)) >> 5;
-}
-
-inline uint16_t keep_one_bit(uint16_t v) {
-    return v & -v;
-}
-
-uint8_t count_bits(uint32_t n) {
-    uint8_t count = 0;
-    while (n) {
-        count += n & 1;
-        n >>= 1;
-    }
-    return count;
-}
-
-template <typename T>
-void destroy_n(T *ptr, uint32_t amount) {
-    for (uint32_t i = 0; i < amount; i++) {
-        ptr[i].~T();
-    }
-}
 
 template <typename T, typename HashFunc, int N>
 class Group {
@@ -246,6 +204,7 @@ class Group {
     inline uint16_t
     get_hash_bytes_mask(uint8_t short_hash) const {
         __m128i cmp_hash = _mm_set1_epi8(short_hash);
+        /* TODO: can crash in some cases */
         __m128i all_hash_bytes = *(__m128i *)m_hash_bytes;
         __m128i byte_mask =
             _mm_cmpeq_epi8(all_hash_bytes, cmp_hash);
@@ -309,9 +268,7 @@ class HashSet {
         Group<T, HashFunc, 6>>::type;
     class GroupArray;
 
-    uint32_t m_group_mask = 0x0;
     uint32_t m_total_elements = 0;
-    uint8_t m_size_exp = 0;
     uint8_t m_hash_byte_shift = 0;
     HashFunc m_hash_fn;
     GroupArray m_groups;
@@ -319,11 +276,33 @@ class HashSet {
   public:
     HashSet()
         : m_hash_fn(HashFunc::get_new()),
-          m_groups(GroupArray(1 << m_size_exp)) {}
+          m_groups(GroupArray(1)) {}
 
     HashSet(std::initializer_list<T> values) : HashSet() {
         for (T value : values) {
             this->insert(value);
+        }
+    }
+
+    HashSet(std::vector<T> &values) : HashSet() {
+        uint32_t length =
+            values.size() / GroupType::s_max_size;
+        uint8_t exp = 1;
+        while ((1 << exp) < length) {
+            exp++;
+        }
+        exp++;
+
+        m_groups = GroupArray(exp);
+        m_hash_byte_shift = (exp / 3) * 3;
+
+        std::vector<uint32_t> hashes =
+            this->calc_hashes(values);
+
+        partial_sort(values.data(), hashes.data(),
+                     values.size(), 18, 6);
+        for (uint32_t i = 0; i < values.size(); i++) {
+            this->insert_new(values[i], hashes[i]);
         }
     }
 
@@ -351,13 +330,6 @@ class HashSet {
     void insert_new(T &value) REAL_NOINLINE {
         uint32_t hash = this->calc_hash(value);
         this->insert_new(value, hash);
-    }
-
-    void
-    insert_many_new(std::vector<T> &values) REAL_NOINLINE {
-        std::vector<uint32_t> hashes =
-            this->calc_hashes(values);
-        this->insert_many_new(values, hashes);
     }
 
     bool contains(const T &value) NOINLINE {
@@ -410,14 +382,6 @@ class HashSet {
         return hashes;
     }
 
-    void insert_many_new(std::vector<T> values,
-                         std::vector<uint32_t> hashes) {
-        assert(values.size() == hashes.size());
-        for (uint32_t i = 0; i < values.size(); i++) {
-            this->insert_new(values[i], hashes[i]);
-        }
-    }
-
     inline uint32_t calc_hash(const T &value) const {
         return m_hash_fn(value);
     }
@@ -431,7 +395,7 @@ class HashSet {
     }
 
     inline uint32_t group_index(uint32_t hash) const {
-        return hash & m_group_mask;
+        return hash & m_groups.mask();
     }
 
     float fullness() const {
@@ -441,19 +405,19 @@ class HashSet {
     }
 
     void grow() REAL_NOINLINE {
-        if (m_size_exp % 3 == 0 && m_size_exp > 0) {
-            m_hash_byte_shift = m_size_exp;
+        if (m_groups.size_exp() % 3 == 0 &&
+            m_groups.size_exp() > 0) {
+            m_hash_byte_shift = m_groups.size_exp();
             this->recalculate_hash_bytes();
         }
 
         uint8_t decision_mask =
-            1 << (m_size_exp - m_hash_byte_shift);
+            1 << (m_groups.size_exp() - m_hash_byte_shift);
 
         uint32_t old_group_amount = this->group_amount();
-        uint32_t new_group_amount = old_group_amount * 2;
 
         GroupArray new_groups =
-            GroupArray(new_group_amount);
+            GroupArray(m_groups.size_exp() + 1);
 
         for (uint32_t i = 0; i < old_group_amount; i++) {
             GroupType &g0 = new_groups[i];
@@ -463,8 +427,6 @@ class HashSet {
             m_groups[i].split(g0, g1, decision_mask);
         }
 
-        m_size_exp++;
-        m_group_mask = (1 << m_size_exp) - 1;
         m_groups = std::move(new_groups);
     }
 
@@ -480,6 +442,8 @@ class HashSet {
       private:
         GroupType *m_data;
         uint32_t m_length;
+        uint32_t m_mask;
+        uint8_t m_size_exp;
 
         GroupType *allocate(uint32_t length) {
             return (GroupType *)aligned_alloc(
@@ -487,11 +451,17 @@ class HashSet {
         }
 
       public:
-        GroupArray(uint32_t length) {
-            m_data = this->allocate(length);
-            m_length = length;
+        void settings_from_exp(uint8_t exp) {
+            m_length = 1 << exp;
+            m_mask = m_length - 1;
+            m_size_exp = exp;
+        }
 
-            for (uint32_t i = 0; i < length; i++) {
+        GroupArray(uint8_t size_exp) {
+            this->settings_from_exp(size_exp);
+            m_data = this->allocate(m_length);
+
+            for (uint32_t i = 0; i < m_length; i++) {
                 new (m_data + i) GroupType();
             }
         }
@@ -504,16 +474,15 @@ class HashSet {
         }
 
         GroupArray(const GroupArray &other) {
-            m_length = other.m_length;
+            this->settings_from_exp(other.m_size_exp);
             m_data = this->allocate(m_length);
             std::uninitialized_copy_n(other.m_data,
                                       m_length, m_data);
         }
 
         GroupArray(GroupArray &&other) {
-            m_length = other.m_length;
+            this->settings_from_exp(other.m_size_exp);
             m_data = other.m_data;
-            other.m_length = 0;
             other.m_data = nullptr;
         }
 
@@ -523,7 +492,7 @@ class HashSet {
             }
             destroy_n(m_data, m_length);
             std::free(m_data);
-            m_length = other.m_length;
+            this->settings_from_exp(other.m_size_exp);
             m_data = this->allocate(m_length);
             std::uninitialized_copy_n(other.m_data,
                                       m_length, m_data);
@@ -536,7 +505,7 @@ class HashSet {
             }
             destroy_n(m_data, m_length);
             std::free(m_data);
-            m_length = other.m_length;
+            this->settings_from_exp(other.m_size_exp);
             m_data = other.m_data;
             other.m_length = 0;
             other.m_data = nullptr;
@@ -547,8 +516,16 @@ class HashSet {
             return m_data[index];
         }
 
+        uint8_t size_exp() const {
+            return m_size_exp;
+        }
+
         uint32_t size() const {
             return m_length;
+        }
+
+        uint32_t mask() const {
+            return m_mask;
         }
     };
 
@@ -605,7 +582,13 @@ class HashSet {
     };
 
     Iterator begin() const {
-        return Iterator(*this, 0, 0);
+        for (uint32_t i = 0; i < this->group_amount();
+             i++) {
+            if (m_groups[i].size() > 0) {
+                return Iterator(*this, i, 0);
+            }
+        }
+        return this->end();
     }
 
     Iterator end() const {
