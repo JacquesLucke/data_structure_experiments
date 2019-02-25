@@ -281,8 +281,9 @@ class HashSet {
     }
 
     void insert(T &value) {
-        if (!this->contains(value)) {
-            this->insert_new(value);
+        uint32_t hash = this->calc_hash(value);
+        if (!this->contains(value, hash)) {
+            this->insert_new(value, hash);
         }
     }
 
@@ -293,25 +294,12 @@ class HashSet {
 
     void insert_new(T &value) REAL_NOINLINE {
         uint32_t hash = this->calc_hash(value);
-
-        while (true) {
-            uint8_t hash_byte = this->to_hash_byte(hash);
-            uint32_t index = this->group_index(hash);
-            GroupType &group = m_groups[index];
-            if (group.try_insert_new(value, hash_byte)) {
-                break;
-            }
-            this->grow();
-        }
-        m_total_elements++;
+        this->insert_new(value, hash);
     }
 
     bool contains(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
-        uint8_t hash_byte = this->to_hash_byte(hash);
-        uint32_t index = this->group_index(hash);
-        GroupType &group = m_groups[index];
-        return group.contains(value, hash_byte);
+        return this->contains(value, hash);
     }
 
     void remove(const T &&value) {
@@ -329,6 +317,26 @@ class HashSet {
     }
 
   private:
+    void insert_new(T &value, uint32_t hash) {
+        while (true) {
+            uint8_t hash_byte = this->to_hash_byte(hash);
+            uint32_t index = this->group_index(hash);
+            GroupType &group = m_groups[index];
+            if (group.try_insert_new(value, hash_byte)) {
+                break;
+            }
+            this->grow();
+        }
+        m_total_elements++;
+    }
+
+    bool contains(const T &value, uint32_t hash) {
+        uint8_t hash_byte = this->to_hash_byte(hash);
+        uint32_t index = this->group_index(hash);
+        GroupType &group = m_groups[index];
+        return group.contains(value, hash_byte);
+    }
+
     inline uint32_t calc_hash(const T &value) const {
         return m_hash_fn(value);
     }

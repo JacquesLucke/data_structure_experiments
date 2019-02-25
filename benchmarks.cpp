@@ -11,7 +11,7 @@ static void BM_HashSet_InsertNew(benchmark::State &state) {
         set = IntSet();
         state.ResumeTiming();
         for (int i = 0; i < state.range(0); i++) {
-            set.insert_new(i);
+            set.insert(i);
         }
     }
     state.SetItemsProcessed(state.iterations() *
