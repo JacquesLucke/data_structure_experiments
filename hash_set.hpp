@@ -1,10 +1,12 @@
 #include "utils.hpp"
+#include <assert.h>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
+#include <vector>
 
 #include <smmintrin.h>
 
@@ -61,14 +63,14 @@ class Group {
     /* can also be zero initialized */
     Group() = default;
 
-    static void Reset(Group &group) {
+    static void Init(Group &group) {
         group.m_count = 0;
         group.m_used_mask = 0x0;
     }
 
-    ~Group() {
-        for (uint8_t i = 0; i < m_count; i++) {
-            this->element_pointer(i)->~T();
+    static void Clear(Group &group) {
+        for (uint8_t i = 0; i < group.m_count; i++) {
+            group.element_pointer(i)->~T();
         }
     }
 
@@ -271,6 +273,11 @@ class HashSet {
         }
     }
 
+    ~HashSet() {
+        this->free_group_array(m_groups,
+                               this->group_amount());
+    }
+
     inline uint32_t size() {
         return m_total_elements;
     }
@@ -295,6 +302,13 @@ class HashSet {
     void insert_new(T &value) REAL_NOINLINE {
         uint32_t hash = this->calc_hash(value);
         this->insert_new(value, hash);
+    }
+
+    void
+    insert_many_new(std::vector<T> &values) REAL_NOINLINE {
+        std::vector<uint32_t> hashes =
+            this->calc_hashes(values);
+        this->insert_many_new(values, hashes);
     }
 
     bool contains(const T &value) NOINLINE {
@@ -337,6 +351,24 @@ class HashSet {
         return group.contains(value, hash_byte);
     }
 
+    std::vector<uint32_t>
+    calc_hashes(const std::vector<T> values) {
+        std::vector<uint32_t> hashes(values.size());
+        for (uint32_t i = 0; i < values.size(); i++) {
+            uint32_t hash = this->calc_hash(values[i]);
+            hashes[i] = hash;
+        }
+        return hashes;
+    }
+
+    void insert_many_new(std::vector<T> values,
+                         std::vector<uint32_t> hashes) {
+        assert(values.size() == hashes.size());
+        for (uint32_t i = 0; i < values.size(); i++) {
+            this->insert_new(values[i], hashes[i]);
+        }
+    }
+
     inline uint32_t calc_hash(const T &value) const {
         return m_hash_fn(value);
     }
@@ -368,19 +400,21 @@ class HashSet {
         uint8_t decision_mask =
             1 << (m_size_exp - m_hash_byte_shift);
 
-        GroupType *new_groups =
-            this->new_group_array(this->group_amount() * 2);
+        uint32_t old_group_amount = this->group_amount();
+        uint32_t new_group_amount = old_group_amount * 2;
 
-        for (uint32_t i = 0; i < this->group_amount();
-             i++) {
+        GroupType *new_groups =
+            this->new_group_array(new_group_amount);
+
+        for (uint32_t i = 0; i < old_group_amount; i++) {
             GroupType &g0 = new_groups[i];
             GroupType &g1 =
-                new_groups[this->group_amount() + i];
+                new_groups[old_group_amount + i];
 
             m_groups[i].split(g0, g1, decision_mask);
         }
 
-        this->free_group_array(m_groups);
+        this->free_group_array(m_groups, old_group_amount);
         m_size_exp++;
         m_group_mask = (1 << m_size_exp) - 1;
         m_groups = new_groups;
@@ -389,7 +423,7 @@ class HashSet {
     GroupType *new_group_array(uint32_t amount) {
         GroupType *groups = (GroupType *)aligned_alloc(
             64, amount * sizeof(GroupType));
-        this->reset_group_array(groups, amount);
+        this->init_group_array(groups, amount);
 
         return groups;
     }
@@ -402,14 +436,18 @@ class HashSet {
         }
     }
 
-    void reset_group_array(GroupType *groups,
-                           uint32_t length) {
+    void init_group_array(GroupType *groups,
+                          uint32_t length) {
         for (uint32_t i = 0; i < length; i++) {
-            GroupType::Reset(groups[i]);
+            GroupType::Init(groups[i]);
         }
     }
 
-    void free_group_array(GroupType *groups) {
+    void free_group_array(GroupType *groups,
+                          uint32_t length) {
+        for (uint32_t i = 0; i < length; i++) {
+            GroupType::Clear(groups[i]);
+        }
         std::free(groups);
     }
 

@@ -9,9 +9,8 @@ using StringSet = HashSet<std::string, HashString>;
 
 int main() {
     IntSet set;
-    for (int i = 0; i < 100; i++) {
-        set.insert(i);
-    }
+    std::vector<int> values = {4, 6, 8};
+    set.insert_many_new(values);
 
     std::cout << "Values:" << std::endl;
     for (int v : set) {
