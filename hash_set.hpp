@@ -354,11 +354,7 @@ class HashSet {
     void grow() REAL_NOINLINE {
         if (m_size_exp % 3 == 0 && m_size_exp > 0) {
             m_hash_byte_shift = m_size_exp;
-            for (uint32_t i = 0; i < this->group_amount();
-                 i++) {
-                m_groups[i].update_hash_bytes(
-                    m_hash_fn, m_hash_byte_shift);
-            }
+            this->recalculate_hash_bytes();
         }
 
         uint8_t decision_mask =
@@ -388,6 +384,14 @@ class HashSet {
         this->reset_group_array(groups, amount);
 
         return groups;
+    }
+
+    void recalculate_hash_bytes() {
+        for (uint32_t i = 0; i < this->group_amount();
+             i++) {
+            m_groups[i].update_hash_bytes(
+                m_hash_fn, m_hash_byte_shift);
+        }
     }
 
     void reset_group_array(GroupType *groups,
