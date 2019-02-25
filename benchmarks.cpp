@@ -5,9 +5,10 @@
 using IntSet = HashSet<int, HashBits32>;
 
 static void BM_HashSet_Insert(benchmark::State &state) {
+    IntSet set;
     for (auto _ : state) {
         state.PauseTiming();
-        IntSet set;
+        set = {};
         state.ResumeTiming();
         for (int i = 0; i < state.range(0); i++) {
             set.insert(i);
@@ -18,9 +19,10 @@ static void BM_HashSet_Insert(benchmark::State &state) {
 }
 
 static void BM_HashSet_InsertNew(benchmark::State &state) {
+    IntSet set;
     for (auto _ : state) {
         state.PauseTiming();
-        IntSet set;
+        set = {};
         state.ResumeTiming();
         for (int i = 0; i < state.range(0); i++) {
             set.insert_new(i);
@@ -32,9 +34,10 @@ static void BM_HashSet_InsertNew(benchmark::State &state) {
 
 static void
 BM_HashSet_InsertManyNew(benchmark::State &state) {
+    IntSet set;
     for (auto _ : state) {
         state.PauseTiming();
-        IntSet set = IntSet();
+        set = {};
         state.ResumeTiming();
         std::vector<int> values(state.range(0));
         for (int i = 0; i < state.range(0); i++) {

@@ -46,6 +46,13 @@ uint8_t count_bits(uint32_t n) {
     return count;
 }
 
+template <typename T>
+void destroy_n(T *ptr, uint32_t amount) {
+    for (uint32_t i = 0; i < amount; i++) {
+        ptr[i].~T();
+    }
+}
+
 template <typename T, typename HashFunc, int N>
 class Group {
   public:
@@ -53,25 +60,68 @@ class Group {
 
   private:
     char m_hash_bytes[s_max_size];
-    uint16_t m_used_mask = 0x0;
-    uint8_t m_count = 0;
+    uint16_t m_used_mask;
+    uint8_t m_count;
     char m_values[sizeof(T) * s_max_size];
-
-    Group(Group &group) = delete;
 
   public:
     /* can also be zero initialized */
-    Group() = default;
+    Group() : m_used_mask(0x0), m_count(0) {}
 
-    static void Init(Group &group) {
-        group.m_count = 0;
-        group.m_used_mask = 0x0;
+    ~Group() {
+        destroy_n(this->element_pointer(0), m_count);
     }
 
-    static void Clear(Group &group) {
-        for (uint8_t i = 0; i < group.m_count; i++) {
-            group.element_pointer(i)->~T();
+    Group(Group &other) {
+        this->copy_metadata_from(other);
+        std::uninitialized_copy_n(other.value_pointer(),
+                                  m_count,
+                                  this->value_pointer());
+    }
+
+    Group(Group &&other) {
+        this->copy_metadata_from(other);
+        std::uninitialized_copy_n(
+            std::make_move_iterator(other.value_pointer()),
+            m_count, this->value_pointer());
+    }
+
+    Group &operator=(const Group &other) {
+        if (this == &other) {
+            return *this;
         }
+        destroy_n(this->element_pointer(0), m_count);
+        this->copy_metadata_from(other);
+        std::uninitialized_copy_n(other.value_pointer(),
+                                  m_count,
+                                  this->value_pointer());
+        return *this;
+    }
+
+    Group &operator=(Group &&other) {
+        if (this == &other) {
+            return *this;
+        }
+        destroy_n(this->element_pointer(0), m_count);
+        this->copy_metadata_from(other);
+        std::uninitialized_copy_n(
+            std::make_move_iterator(other.value_pointer()),
+            m_count, this->value_pointer());
+        return *this;
+    }
+
+    void copy_metadata_from(const Group &other) {
+        std::memcpy(m_hash_bytes, other.m_hash_bytes,
+                    s_max_size);
+        m_used_mask = other.m_used_mask;
+        m_count = other.m_count;
+    }
+
+    void copy_metadata_from(const Group &&other) {
+        std::memcpy(m_hash_bytes, other.m_hash_bytes,
+                    s_max_size);
+        m_used_mask = other.m_used_mask;
+        m_count = other.m_count;
     }
 
     inline uint8_t size() const {
@@ -239,6 +289,10 @@ class Group {
         return *this->element_pointer(position);
     }
 
+    inline T *value_pointer() const {
+        return this->element_pointer(0);
+    }
+
     inline T *element_pointer(uint8_t position) const {
         return (T *)m_values + position;
     }
@@ -253,29 +307,24 @@ class HashSet {
     using GroupType = typename std::conditional<
         sizeof(T) == 4, Group<T, HashFunc, 12>,
         Group<T, HashFunc, 6>>::type;
+    class GroupArray;
 
     uint32_t m_group_mask = 0x0;
     uint32_t m_total_elements = 0;
-    GroupType *m_groups;
     uint8_t m_size_exp = 0;
     uint8_t m_hash_byte_shift = 0;
     HashFunc m_hash_fn;
+    GroupArray m_groups;
 
   public:
-    HashSet() : m_hash_fn(HashFunc::get_new()) {
-        m_groups =
-            this->new_group_array(this->group_amount());
-    }
+    HashSet()
+        : m_hash_fn(HashFunc::get_new()),
+          m_groups(GroupArray(1 << m_size_exp)) {}
 
     HashSet(std::initializer_list<T> values) : HashSet() {
         for (T value : values) {
             this->insert(value);
         }
-    }
-
-    ~HashSet() {
-        this->free_group_array(m_groups,
-                               this->group_amount());
     }
 
     inline uint32_t size() {
@@ -378,7 +427,7 @@ class HashSet {
     }
 
     inline uint32_t group_amount() const {
-        return 1 << m_size_exp;
+        return m_groups.size();
     }
 
     inline uint32_t group_index(uint32_t hash) const {
@@ -403,8 +452,8 @@ class HashSet {
         uint32_t old_group_amount = this->group_amount();
         uint32_t new_group_amount = old_group_amount * 2;
 
-        GroupType *new_groups =
-            this->new_group_array(new_group_amount);
+        GroupArray new_groups =
+            GroupArray(new_group_amount);
 
         for (uint32_t i = 0; i < old_group_amount; i++) {
             GroupType &g0 = new_groups[i];
@@ -414,18 +463,9 @@ class HashSet {
             m_groups[i].split(g0, g1, decision_mask);
         }
 
-        this->free_group_array(m_groups, old_group_amount);
         m_size_exp++;
         m_group_mask = (1 << m_size_exp) - 1;
-        m_groups = new_groups;
-    }
-
-    GroupType *new_group_array(uint32_t amount) {
-        GroupType *groups = (GroupType *)aligned_alloc(
-            64, amount * sizeof(GroupType));
-        this->init_group_array(groups, amount);
-
-        return groups;
+        m_groups = std::move(new_groups);
     }
 
     void recalculate_hash_bytes() {
@@ -436,20 +476,81 @@ class HashSet {
         }
     }
 
-    void init_group_array(GroupType *groups,
-                          uint32_t length) {
-        for (uint32_t i = 0; i < length; i++) {
-            GroupType::Init(groups[i]);
-        }
-    }
+    class GroupArray {
+      private:
+        GroupType *m_data;
+        uint32_t m_length;
 
-    void free_group_array(GroupType *groups,
-                          uint32_t length) {
-        for (uint32_t i = 0; i < length; i++) {
-            GroupType::Clear(groups[i]);
+        GroupType *allocate(uint32_t length) {
+            return (GroupType *)aligned_alloc(
+                64, length * sizeof(GroupType));
         }
-        std::free(groups);
-    }
+
+      public:
+        GroupArray(uint32_t length) {
+            m_data = this->allocate(length);
+            m_length = length;
+
+            for (uint32_t i = 0; i < length; i++) {
+                new (m_data + i) GroupType();
+            }
+        }
+
+        ~GroupArray() {
+            if (m_data != nullptr) {
+                destroy_n(m_data, m_length);
+                std::free(m_data);
+            }
+        }
+
+        GroupArray(const GroupArray &other) {
+            m_length = other.m_length;
+            m_data = this->allocate(m_length);
+            std::uninitialized_copy_n(other.m_data,
+                                      m_length, m_data);
+        }
+
+        GroupArray(GroupArray &&other) {
+            m_length = other.m_length;
+            m_data = other.m_data;
+            other.m_length = 0;
+            other.m_data = nullptr;
+        }
+
+        GroupArray &operator=(const GroupArray &other) {
+            if (this == &other) {
+                return *this;
+            }
+            destroy_n(m_data, m_length);
+            std::free(m_data);
+            m_length = other.m_length;
+            m_data = this->allocate(m_length);
+            std::uninitialized_copy_n(other.m_data,
+                                      m_length, m_data);
+            return *this;
+        }
+
+        GroupArray &operator=(GroupArray &&other) {
+            if (this == &other) {
+                return *this;
+            }
+            destroy_n(m_data, m_length);
+            std::free(m_data);
+            m_length = other.m_length;
+            m_data = other.m_data;
+            other.m_length = 0;
+            other.m_data = nullptr;
+            return *this;
+        }
+
+        GroupType &operator[](const uint32_t index) const {
+            return m_data[index];
+        }
+
+        uint32_t size() const {
+            return m_length;
+        }
+    };
 
   public:
     /*************** Iterator *******************/

@@ -15,6 +15,17 @@ TEST(HashSet, InitializerListConstructor) {
     EXPECT_EQ(set.size(), 3);
 }
 
+TEST(HashSet, CopyConstructor) {
+    IntSet set1 = {1, 2, 3};
+    IntSet set2 = set1;
+
+    EXPECT_FALSE(set1.contains(4));
+    EXPECT_FALSE(set2.contains(4));
+    set2.insert(4);
+    EXPECT_FALSE(set1.contains(4));
+    EXPECT_TRUE(set2.contains(4));
+}
+
 TEST(HashSet, InsertNewIncreasesSize) {
     IntSet set;
     EXPECT_EQ(set.size(), 0);
