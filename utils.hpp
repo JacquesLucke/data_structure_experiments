@@ -41,13 +41,22 @@ inline uint16_t keep_one_bit(uint16_t v) {
     return v & -v;
 }
 
-uint8_t count_bits(uint32_t n) {
+inline uint8_t count_bits(uint32_t n) {
     uint8_t count = 0;
     while (n) {
         count += n & 1;
         n >>= 1;
     }
     return count;
+}
+
+inline constexpr uint32_t
+next_multiple(uint32_t multiple_of, uint32_t value) {
+    uint32_t result = 0;
+    while (result < value) {
+        result += multiple_of;
+    }
+    return result;
 }
 
 template <typename T>

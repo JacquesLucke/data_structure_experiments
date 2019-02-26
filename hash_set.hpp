@@ -22,6 +22,20 @@ class Group {
     uint8_t m_count;
     char m_values[sizeof(T) * s_max_size];
 
+    struct MeasureSize {
+        char s1[sizeof(m_hash_bytes)];
+        uint16_t s2;
+        uint8_t s3;
+        char s4[sizeof(m_values)];
+    };
+
+    static const uint32_t s_required_size =
+        sizeof(MeasureSize);
+    static const uint32_t s_pad_size =
+        next_multiple(64, s_required_size) -
+        s_required_size;
+    char pad[s_pad_size];
+
   public:
     /* can also be zero initialized */
     Group() : m_used_mask(0x0), m_count(0) {}
@@ -446,6 +460,7 @@ class HashSet {
         uint8_t m_size_exp;
 
         GroupType *allocate(uint32_t length) {
+            static_assert(sizeof(GroupType) % 64 == 0);
             return (GroupType *)aligned_alloc(
                 64, length * sizeof(GroupType));
         }
