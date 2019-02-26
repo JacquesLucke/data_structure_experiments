@@ -159,6 +159,8 @@ class Group {
                 std::move(value), hash_byte);
             value.~T();
         }
+        m_count = 0;
+        m_used_mask = 0x0;
     }
 
     void update_hash_bytes(HashFunc hash_fn,
@@ -218,7 +220,7 @@ class Group {
     inline uint16_t
     get_hash_bytes_mask(uint8_t short_hash) const {
         __m128i cmp_hash = _mm_set1_epi8(short_hash);
-        /* TODO: can crash in some cases */
+        /* group has to be aligned to make this work */
         __m128i all_hash_bytes = *(__m128i *)m_hash_bytes;
         __m128i byte_mask =
             _mm_cmpeq_epi8(all_hash_bytes, cmp_hash);
