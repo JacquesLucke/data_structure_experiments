@@ -15,5 +15,7 @@ int main() {
         std::cout << v << " ";
     }
 
+    set.print_state();
+
     std::cout << std::endl;
 }

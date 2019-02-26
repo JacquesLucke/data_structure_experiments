@@ -292,7 +292,7 @@ class HashSet {
   public:
     HashSet()
         : m_hash_fn(HashFunc::get_new()),
-          m_groups(GroupArray(1)) {}
+          m_groups(GroupArray(0)) {}
 
     HashSet(std::initializer_list<T> values) : HashSet() {
         for (T value : values) {
@@ -360,11 +360,29 @@ class HashSet {
 
     void remove(const T &value) NOINLINE {
         uint32_t hash = this->calc_hash(value);
-        uint8_t hash_byte = this->to_hash_byte(hash);
-        uint32_t index = this->group_index(hash);
-        GroupType &group = m_groups[index];
-        bool existed = group.remove(value, hash_byte);
-        if (existed) m_total_elements--;
+        this->remove(value, hash);
+    }
+
+    void print_state() {
+        uint32_t amount[GroupType::s_max_size + 1] = {0};
+        for (GroupType &group : m_groups) {
+            amount[group.size()]++;
+        }
+        std::cout << "HashSet:" << std::endl;
+        std::cout << "  Capacity: " << this->capacity()
+                  << std::endl;
+        std::cout << "  Elements: " << this->size()
+                  << std::endl;
+        std::cout << "  Main Groups: " << m_groups.size()
+                  << std::endl;
+        std::cout << "  Fullness: " << this->fullness()
+                  << std::endl;
+        for (int i = 0; i < GroupType::s_max_size + 1;
+             i++) {
+            std::cout << "  " << i << ":" << amount[i]
+                      << std::endl;
+        }
+        std::cout << std::endl;
     }
 
   private:
@@ -386,6 +404,14 @@ class HashSet {
         uint32_t index = this->group_index(hash);
         GroupType &group = m_groups[index];
         return group.contains(value, hash_byte);
+    }
+
+    void remove(const T &value, uint32_t hash) {
+        uint8_t hash_byte = this->to_hash_byte(hash);
+        uint32_t index = this->group_index(hash);
+        GroupType &group = m_groups[index];
+        bool existed = group.remove(value, hash_byte);
+        if (existed) m_total_elements--;
     }
 
     std::vector<uint32_t>
@@ -416,8 +442,11 @@ class HashSet {
 
     float fullness() const {
         return this->m_total_elements /
-               (float)(GroupType::s_max_size *
-                       this->group_amount());
+               (float)this->capacity();
+    }
+
+    int capacity() const {
+        return this->group_amount() * GroupType::s_max_size;
     }
 
     void grow() REAL_NOINLINE {
@@ -462,7 +491,9 @@ class HashSet {
         uint8_t m_size_exp;
 
         GroupType *allocate(uint32_t length) {
-            static_assert(sizeof(GroupType) % 64 == 0);
+            static_assert(sizeof(GroupType) % 64 == 0,
+                          "sizeof(GroupType) has to be a "
+                          "multiple of 64");
             return (GroupType *)aligned_alloc(
                 64, length * sizeof(GroupType));
         }
@@ -543,6 +574,14 @@ class HashSet {
 
         uint32_t mask() const {
             return m_mask;
+        }
+
+        GroupType *begin() const {
+            return m_data;
+        }
+
+        GroupType *end() const {
+            return m_data + m_length;
         }
     };
 
