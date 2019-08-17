@@ -33,10 +33,6 @@
  * interleaved.
  */
 
-constexpr auto OFFSET_MASK = 3;
-constexpr auto IS_EMPTY = 0;
-constexpr auto IS_SET = 1;
-
 template<typename T> class MyHash {
 };
 
@@ -215,8 +211,13 @@ template<typename SlotGroup> class GroupedOpenAddressingArray {
     return m_slots_set >= m_slots_total / 2;
   }
 };
+
 template<typename T> class Set {
  private:
+  static constexpr uint32_t OFFSET_MASK = 3;
+  static constexpr uint8_t IS_EMPTY = 0;
+  static constexpr uint8_t IS_SET = 1;
+
   struct Group {
     static constexpr uint32_t slots_per_group = 4;
 
@@ -247,7 +248,7 @@ template<typename T> class Set {
     }
   };
 
-  GroupedOpenAddressingArray<Group> m_array;
+  GroupedOpenAddressingArray<Group> m_array = GroupedOpenAddressingArray<Group>(1);
 
  public:
   Set() = default;
@@ -275,6 +276,7 @@ template<typename T> class Set {
 
   void add_new(const T &value)
   {
+    assert(!this->contains(value));
     this->ensure_can_add();
 
     ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
@@ -289,14 +291,14 @@ template<typename T> class Set {
     ITER_SLOTS_END(offset);
   }
 
-  bool constains(const T &value) const
+  bool contains(const T &value) const
   {
-    ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
-      uint8_t status = group.status[offset];
+    ITER_SLOTS_BEGIN (value, m_array, const, group, offset) {
+      uint8_t status = group.status(offset);
       if (status == IS_EMPTY) {
         return false;
       }
-      else if (status == IS_SET && group.values[offset] == value) {
+      else if (status == IS_SET && *group.value(offset) == value) {
         return true;
       }
     }
