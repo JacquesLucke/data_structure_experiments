@@ -4,7 +4,12 @@
 #include <string>
 #include <array>
 #include <cassert>
+#include <random>
+#include <cstdlib>
+#include <vector>
 #include <stdint.h>
+#include <xmmintrin.h>
+#include "timeit.hpp"
 
 /* The probing strategy is as follows:
  *   hash = compute_hash(value);
@@ -210,9 +215,10 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
     return *this;
   }
 
-  GroupedOpenAddressingArray init_grown() const
+  GroupedOpenAddressingArray init_reserved(uint32_t min_usable_slots) const
   {
-    GroupedOpenAddressingArray grown(m_group_exponent + 1);
+    uint8_t group_exponent = ceillog2(min_usable_slots / slots_per_group + 1) + 1;
+    GroupedOpenAddressingArray grown(group_exponent);
     grown.m_slots_set_or_dummy = this->slots_set();
     return grown;
   }
@@ -429,6 +435,11 @@ template<typename T> class Set {
 
   // clang-format on
 
+  void reserve(uint32_t min_usable_slots)
+  {
+    this->grow(min_usable_slots);
+  }
+
   void add_new(const T &value)
   {
     assert(!this->contains(value));
@@ -442,6 +453,28 @@ template<typename T> class Set {
       }
     }
     ITER_SLOTS_END(offset);
+  }
+
+  void add_many(T *values, uint32_t amount)
+  {
+    constexpr uint32_t prefetch_distance = 6;
+    constexpr uint32_t offset_factor = sizeof(Group) / 4;
+    assert(sizeof(Group) % 4 == 0);
+    uint32_t pipelined_adds = std::max<uint32_t>(amount - prefetch_distance - 1, 0);
+
+    for (uint32_t i = 0; i < pipelined_adds; i++) {
+      const T &prefetch_value = values[i + prefetch_distance];
+      uint32_t hash = MyHash<T>{}(prefetch_value);
+      uint32_t slot = hash & m_array.slot_mask();
+      char *array_position = (char *)m_array.begin() + slot * offset_factor;
+      _mm_prefetch(array_position, _MM_HINT_T0);
+
+      this->add(values[i]);
+    }
+
+    for (uint32_t i = pipelined_adds; i < amount; i++) {
+      this->add(values[i]);
+    }
   }
 
   bool add(const T &value)
@@ -525,14 +558,14 @@ template<typename T> class Set {
   void ensure_can_add()
   {
     if (m_array.should_grow()) {
-      this->grow();
+      this->grow(this->size() + 1);
     }
   }
 
-  void grow()
+  void grow(uint32_t min_usable_slots)
   {
-    std::cout << "Grow at " << m_array.slots_set() << '/' << m_array.slots_total() << '\n';
-    GroupedOpenAddressingArray<Group> new_array = m_array.init_grown();
+    // std::cout << "Grow at " << m_array.slots_set() << '/' << m_array.slots_total() << '\n';
+    GroupedOpenAddressingArray<Group> new_array = m_array.init_reserved(min_usable_slots);
 
     for (Group &old_group : m_array) {
       for (uint8_t offset = 0; offset < 4; offset++) {
@@ -803,13 +836,13 @@ template<typename KeyT, typename ValueT> class Map {
   void ensure_can_add()
   {
     if (m_array.should_grow()) {
-      this->grow();
+      this->grow(this->size() + 1);
     }
   }
 
-  void grow()
+  void grow(uint32_t min_usable_slots)
   {
-    GroupedOpenAddressingArray<Group> new_array = m_array.init_grown();
+    GroupedOpenAddressingArray<Group> new_array = m_array.init_reserved(min_usable_slots);
     for (Group &old_group : m_array) {
       for (uint32_t offset = 0; offset < 4; offset++) {
         if (old_group.status(offset) == IS_SET) {
@@ -933,33 +966,36 @@ template<typename KeyT, typename ValueT, typename KeyInfo> class KeyInfoMap {
 
 int main()
 {
-  std::cout << "Start" << std::endl;
-  Set<std::string> myset;
-  for (int i = 0; i < 200; i++) {
-    myset.add(std::to_string(i) + " 12345678901234567890");
-  }
-  for (int i = 100; i < 300; i++) {
-    myset.add(std::to_string(i) + " 12345678901234567890");
-  }
-  for (int i = 50; i < 120; i++) {
-    myset.remove(std::to_string(i) + " 12345678901234567890");
+  uint32_t amount = 100'000'000;
+  std::vector<int> numbers;
+  numbers.reserve(amount);
+
+  srand(1);
+  {
+    TIMEIT("compute random numbers");
+    for (uint32_t i = 0; i < amount; i++) {
+      numbers.push_back((rand() << 16) | rand());
+    }
   }
 
-  // myset.print_table();
-  std::cout << "End\n";
-  std::cout << myset.size() << '\n';
+  std::vector<uint32_t> test_cases = {
+      100, 1'000, 10'000, 100'000, 1'000'000, 10'000'000, 100'000'000};
 
-  Set<int> test;
-  test.add(1);
-  auto other_set = std::move(test);
-  other_set.print_table();
-  test.print_table();
-
-  Map<std::string, std::string> mymap;
-  for (int i = 0; i < 100; i++) {
-    mymap.add_new("Key: " + std::to_string(i), "Value: " + std::to_string(i));
+  for (uint32_t size : test_cases) {
+    std::cout << "Amount: " << size << '\n';
+    for (uint32_t iteration = 0; iteration < 10; iteration++) {
+      Set<int> myset;
+      myset.reserve(size);
+      TIMEIT("insert in map");
+      myset.add_many(&numbers[0], size);
+      /* for (int i = 0; i < size; i++) {
+         myset.add(numbers[i]);
+       }*/
+    }
   }
-  mymap.remove("Key: 53");
-  mymap.print_table();
+
+  int a;
+  std::cin >> a;
+
   return 0;
 }
