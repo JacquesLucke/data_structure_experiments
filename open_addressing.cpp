@@ -554,6 +554,74 @@ template<typename T> class Set {
     }
   }
 
+  class Iterator {
+   private:
+    Set<T> *m_set;
+    uint32_t m_slot;
+
+   public:
+    Iterator(Set *set, uint32_t slot) : m_set(set), m_slot(slot)
+    {
+    }
+
+    Iterator &operator++()
+    {
+      while (true) {
+        m_slot++;
+        if (m_slot == m_set->m_array.slots_total()) {
+          break;
+        }
+        uint32_t group_index = m_slot >> 2;
+        uint32_t offset = m_slot & OFFSET_MASK;
+        Group &group = m_set->m_array.group(group_index);
+        if (group.status(offset) == IS_SET) {
+          break;
+        }
+      }
+      return *this;
+    }
+
+    const T &operator*() const
+    {
+      uint32_t group_index = m_slot >> 2;
+      uint32_t offset = m_slot & OFFSET_MASK;
+      Group &group = m_set->m_array.group(group_index);
+      assert(group.status(offset) == IS_SET);
+      return *group.value(offset);
+    }
+
+    friend bool operator==(const Iterator &a, const Iterator &b)
+    {
+      assert(a.m_step == b.m_set);
+      return a.m_slot == b.m_slot;
+    }
+
+    friend bool operator!=(const Iterator &a, const Iterator &b)
+    {
+      return !(a == b);
+    }
+  };
+
+  friend Iterator;
+
+  Iterator begin()
+  {
+    for (uint32_t slot = 0; slot < m_array.slots_total(); slot++) {
+      uint32_t group_index = slot >> 2;
+      uint32_t offset = slot & OFFSET_MASK;
+      Group &group = m_array.group(group_index);
+      if (group.status(offset) == IS_SET) {
+        return Iterator(this, slot);
+      }
+    }
+    return this->end();
+  }
+
+  Iterator end()
+  {
+    return Iterator(this, m_array.slots_total());
+  }
+
  private:
   void ensure_can_add()
   {
@@ -966,36 +1034,16 @@ template<typename KeyT, typename ValueT, typename KeyInfo> class KeyInfoMap {
 
 int main()
 {
-  uint32_t amount = 100'000'000;
-  std::vector<int> numbers;
-  numbers.reserve(amount);
+  Set<int> myset;
+  myset.add(5);
+  myset.add(2);
+  myset.add(7);
+  myset.add(1);
+  myset.add(80);
+  myset.add(0);
 
-  srand(1);
-  {
-    TIMEIT("compute random numbers");
-    for (uint32_t i = 0; i < amount; i++) {
-      numbers.push_back((rand() << 16) | rand());
-    }
+  for (auto value : myset) {
+    std::cout << value << '\n';
   }
-
-  std::vector<uint32_t> test_cases = {
-      100, 1'000, 10'000, 100'000, 1'000'000, 10'000'000, 100'000'000};
-
-  for (uint32_t size : test_cases) {
-    std::cout << "Amount: " << size << '\n';
-    for (uint32_t iteration = 0; iteration < 10; iteration++) {
-      Set<int> myset;
-      myset.reserve(size);
-      TIMEIT("insert in map");
-      myset.add_many(&numbers[0], size);
-      /* for (int i = 0; i < size; i++) {
-         myset.add(numbers[i]);
-       }*/
-    }
-  }
-
-  int a;
-  std::cin >> a;
-
   return 0;
 }
