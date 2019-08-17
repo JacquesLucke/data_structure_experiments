@@ -592,7 +592,7 @@ template<typename T> class Set {
 
     friend bool operator==(const Iterator &a, const Iterator &b)
     {
-      assert(a.m_step == b.m_set);
+      assert(a.m_set == b.m_set);
       return a.m_slot == b.m_slot;
     }
 
