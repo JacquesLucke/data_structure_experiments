@@ -182,6 +182,11 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
     return *this;
   }
 
+  GroupedOpenAddressingArray init_grown() const
+  {
+    return GroupedOpenAddressingArray(m_group_exponent + 1);
+  }
+
   uint32_t slots_total() const
   {
     return m_slots_total;
@@ -225,6 +230,16 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
   bool should_grow() const
   {
     return m_slots_set >= m_slots_total / 2;
+  }
+
+  SlotGroup *begin()
+  {
+    return m_groups;
+  }
+
+  SlotGroup *end()
+  {
+    return m_groups + m_group_amount;
   }
 
  private:
@@ -376,13 +391,9 @@ template<typename T> class Set {
   void grow()
   {
     std::cout << "Grow at " << m_array.slots_set() << '/' << m_array.slots_total() << '\n';
-    uint8_t old_exponent = m_array.group_exponent();
-    uint8_t new_exponent = old_exponent + 1;
+    GroupedOpenAddressingArray<Group> new_array = m_array.init_grown();
 
-    GroupedOpenAddressingArray<Group> new_array(new_exponent);
-
-    for (uint32_t group_index = 0; group_index < m_array.group_amount(); group_index++) {
-      Group &old_group = m_array.group(group_index);
+    for (Group &old_group : m_array) {
       for (uint8_t offset = 0; offset < 4; offset++) {
         if (old_group.status(offset) == IS_SET) {
           this->reinsert_after_grow(*old_group.value(offset), new_array);
