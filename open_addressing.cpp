@@ -84,7 +84,8 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
   uint32_t m_group_amount;
   uint8_t m_group_exponent;
   uint32_t m_slots_total;
-  uint32_t m_slots_set;
+  uint32_t m_slots_set_or_dummy;
+  uint32_t m_slots_dummy;
   uint32_t m_slot_mask;
   char m_local_storage[sizeof(SlotGroup) * GroupsInSmallStorage];
 
@@ -92,7 +93,8 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
   explicit GroupedOpenAddressingArray(uint8_t group_exponent = 0)
   {
     m_slots_total = (1 << group_exponent) * slots_per_group;
-    m_slots_set = 0;
+    m_slots_set_or_dummy = 0;
+    m_slots_dummy = 0;
     m_slot_mask = m_slots_total - 1;
     m_group_amount = m_slots_total / slots_per_group;
     m_group_exponent = group_exponent;
@@ -124,7 +126,8 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
   GroupedOpenAddressingArray(const GroupedOpenAddressingArray &other)
   {
     m_slots_total = other.m_slots_total;
-    m_slots_set = other.m_slots_set;
+    m_slots_set_or_dummy = other.m_slots_set_or_dummy;
+    m_slots_dummy = other.m_slots_dummy;
     m_slot_mask = other.m_slot_mask;
     m_group_amount = other.m_group_amount;
     m_group_exponent = other.m_group_exponent;
@@ -142,7 +145,8 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
   GroupedOpenAddressingArray(GroupedOpenAddressingArray &&other)
   {
     m_slots_total = other.m_slots_total;
-    m_slots_set = other.m_slots_set;
+    m_slots_set_or_dummy = other.m_slots_set_or_dummy;
+    m_slots_dummy = other.m_slots_dummy;
     m_slot_mask = other.m_slot_mask;
     m_group_amount = other.m_group_amount;
     m_group_exponent = other.m_group_exponent;
@@ -185,7 +189,7 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
   GroupedOpenAddressingArray init_grown() const
   {
     GroupedOpenAddressingArray grown(m_group_exponent + 1);
-    grown.m_slots_set = m_slots_set;
+    grown.m_slots_set_or_dummy = this->slots_set();
     return grown;
   }
 
@@ -194,14 +198,24 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
     return m_slots_total;
   }
 
-  uint32_t &slots_set()
-  {
-    return m_slots_set;
-  }
-
   uint32_t slots_set() const
   {
-    return m_slots_set;
+    return m_slots_set_or_dummy - m_slots_dummy;
+  }
+
+  void update__empty_to_set()
+  {
+    m_slots_set_or_dummy++;
+  }
+
+  void update__dummy_to_set()
+  {
+    m_slots_dummy--;
+  }
+
+  void update__set_to_dummy()
+  {
+    m_slots_dummy++;
   }
 
   uint32_t slot_mask() const
@@ -231,7 +245,7 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
 
   bool should_grow() const
   {
-    return m_slots_set >= m_slots_total / 2;
+    return m_slots_set_or_dummy >= m_slots_total / 2;
   }
 
   SlotGroup *begin()
@@ -302,11 +316,25 @@ template<typename T> class Set {
       return (T *)(m_values + offset * sizeof(T));
     }
 
-    void set_value(uint32_t offset, const T &value)
+    void copy_value(uint32_t offset, const T &value)
     {
       assert(m_status[offset] != IS_SET);
       m_status[offset] = IS_SET;
       std::uninitialized_copy_n(&value, 1, this->value(offset));
+    }
+
+    void move_value(uint32_t offset, T &value)
+    {
+      assert(m_status[offset] != IS_SET);
+      m_status[offset] = IS_SET;
+      std::uninitialized_copy_n(std::make_move_iterator(&value), 1, this->value(offset));
+    }
+
+    void set_dummy(uint32_t offset)
+    {
+      assert(m_status[offset] == IS_SET);
+      m_status[offset] = IS_DUMMY;
+      this->value(offset)->~T();
     }
 
     bool has_value(uint32_t offset, const T &value) const
@@ -348,8 +376,8 @@ template<typename T> class Set {
 
     ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
       if (group.status(offset) == IS_EMPTY) {
-        group.set_value(offset, value);
-        m_array.slots_set()++;
+        group.copy_value(offset, value);
+        m_array.update__empty_to_set();
         return;
       }
     }
@@ -363,8 +391,8 @@ template<typename T> class Set {
     ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
       uint8_t status = group.status(offset);
       if (status == IS_EMPTY) {
-        group.set_value(offset, value);
-        m_array.slots_set()++;
+        group.copy_value(offset, value);
+        m_array.update__empty_to_set();
         return true;
       }
       else if (group.has_value(offset, value)) {
@@ -383,6 +411,19 @@ template<typename T> class Set {
       }
       else if (group.has_value(offset, value)) {
         return true;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  void remove(const T &value)
+  {
+    assert(this->contains(value));
+    ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
+      if (group.has_value(offset, value)) {
+        group.set_dummy(offset);
+        m_array.update__set_to_dummy();
+        return;
       }
     }
     ITER_SLOTS_END(offset);
@@ -412,8 +453,9 @@ template<typename T> class Set {
           uint32_t collisions = this->count_collisions(value);
           std::cout << "    " << value << "  \t Collisions: " << collisions << '\n';
         }
-        else {
-          assert(false);
+
+        else if (status == IS_DUMMY) {
+          std::cout << "    <dummy>\n";
         }
       }
     }
@@ -448,10 +490,8 @@ template<typename T> class Set {
   void reinsert_after_grow(T &old_value, GroupedOpenAddressingArray<Group> &new_array)
   {
     ITER_SLOTS_BEGIN (old_value, new_array, , group, offset) {
-      uint8_t &status = group.status(offset);
-      if (status == IS_EMPTY) {
-        status = IS_SET;
-        std::uninitialized_copy_n(std::make_move_iterator(&old_value), 1, group.value(offset));
+      if (group.status(offset) == IS_EMPTY) {
+        group.move_value(offset, old_value);
         old_value.~T();
         return;
       }
@@ -468,7 +508,7 @@ template<typename T> class Set {
         return collisions;
       }
       else if (status == IS_SET) {
-        if (*group.value(offset) == value) {
+        if (group.has_value(offset, value)) {
           return collisions;
         }
         else {
@@ -496,7 +536,11 @@ int main()
   for (int i = 100; i < 300; i++) {
     myset.add(i);
   }
-  // myset.print_table();
+  for (int i = 50; i < 120; i++) {
+    myset.remove(i);
+  }
+
+  myset.print_table();
   std::cout << "End\n";
   std::cout << myset.size() << '\n';
 }
