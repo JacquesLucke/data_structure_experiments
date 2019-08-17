@@ -57,6 +57,16 @@ template<> class MyHash<std::string> {
   }
 };
 
+template<typename T> void uninitialized_copy_1(const T *from, T *to)
+{
+  std::uninitialized_copy_n(from, 1, to);
+}
+
+template<typename T> void uninitialized_move_1(T *from, T *to)
+{
+  std::uninitialized_copy_n(std::make_move_iterator(from), 1, to);
+}
+
 constexpr unsigned floorlog2(unsigned x)
 {
   return x == 1 ? 0 : 1 + floorlog2(x >> 1);
@@ -316,13 +326,22 @@ template<typename T> class Set {
       m_status[3] = IS_EMPTY;
     }
 
+    ~Group()
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        if (m_status[offset] == IS_SET) {
+          this->value(offset)->~T();
+        }
+      }
+    }
+
     Group(const Group &other)
     {
       for (uint32_t offset = 0; offset < 4; offset++) {
         uint8_t status = other.m_status[offset];
         m_status[offset] = status;
         if (status == IS_SET) {
-          std::uninitialized_copy_n(other.value(offset), 1, this->value(offset));
+          uninitialized_copy_1(other.value(offset), this->value(offset));
         }
       }
     }
@@ -333,8 +352,7 @@ template<typename T> class Set {
         uint8_t status = other.m_status[offset];
         m_status[offset] = status;
         if (status == IS_SET) {
-          std::uninitialized_copy_n(
-              std::make_move_iterator(other.value(offset)), 1, this->value(offset));
+          uninitialized_move_1(other.value(offset), this->value(offset));
         }
       }
     }
@@ -357,18 +375,18 @@ template<typename T> class Set {
       return (T *)(m_values + offset * sizeof(T));
     }
 
-    void copy_value(uint32_t offset, const T &value)
+    void copy_in(uint32_t offset, const T &value)
     {
       assert(m_status[offset] != IS_SET);
       m_status[offset] = IS_SET;
-      std::uninitialized_copy_n(&value, 1, this->value(offset));
+      uninitialized_copy_1(&value, this->value(offset));
     }
 
-    void move_value(uint32_t offset, T &value)
+    void move_in(uint32_t offset, T &value)
     {
       assert(m_status[offset] != IS_SET);
       m_status[offset] = IS_SET;
-      std::uninitialized_copy_n(std::make_move_iterator(&value), 1, this->value(offset));
+      uninitialized_move_1(&value, this->value(offset));
     }
 
     void set_dummy(uint32_t offset)
@@ -417,7 +435,7 @@ template<typename T> class Set {
 
     ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
       if (group.status(offset) == IS_EMPTY) {
-        group.copy_value(offset, value);
+        group.copy_in(offset, value);
         m_array.update__empty_to_set();
         return;
       }
@@ -432,7 +450,7 @@ template<typename T> class Set {
     ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
       uint8_t status = group.status(offset);
       if (status == IS_EMPTY) {
-        group.copy_value(offset, value);
+        group.copy_in(offset, value);
         m_array.update__empty_to_set();
         return true;
       }
@@ -503,13 +521,11 @@ template<typename T> class Set {
   }
 
  private:
-  bool ensure_can_add()
+  void ensure_can_add()
   {
-    if (!m_array.should_grow()) {
-      return false;
+    if (m_array.should_grow()) {
+      this->grow();
     }
-    this->grow();
-    return true;
   }
 
   void grow()
@@ -520,7 +536,7 @@ template<typename T> class Set {
     for (Group &old_group : m_array) {
       for (uint8_t offset = 0; offset < 4; offset++) {
         if (old_group.status(offset) == IS_SET) {
-          this->reinsert_after_grow(*old_group.value(offset), new_array);
+          this->add_after_grow(*old_group.value(offset), new_array);
         }
       }
     }
@@ -528,12 +544,11 @@ template<typename T> class Set {
     m_array = std::move(new_array);
   }
 
-  void reinsert_after_grow(T &old_value, GroupedOpenAddressingArray<Group> &new_array)
+  void add_after_grow(T &old_value, GroupedOpenAddressingArray<Group> &new_array)
   {
     ITER_SLOTS_BEGIN (old_value, new_array, , group, offset) {
       if (group.status(offset) == IS_EMPTY) {
-        group.move_value(offset, old_value);
-        old_value.~T();
+        group.move_in(offset, old_value);
         return;
       }
     }
@@ -571,7 +586,252 @@ template<typename KeyT, typename ValueT> class Map {
 
    public:
     static constexpr uint32_t slots_per_group = 4;
+
+    Group()
+    {
+      m_status[0] = IS_EMPTY;
+      m_status[1] = IS_EMPTY;
+      m_status[2] = IS_EMPTY;
+      m_status[3] = IS_EMPTY;
+    }
+
+    ~Group()
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        if (m_status[offset] == IS_SET) {
+          this->key(offset)->~KeyT();
+          this->value(offset)->~ValueT();
+        }
+      }
+    }
+
+    Group(const Group &other)
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        uint8_t status = other.m_status[offset];
+        m_status[offset] = status;
+        if (status == IS_SET) {
+          uninitialized_copy_1(other.key(offset), this->key(offset));
+          uninitialized_copy_1(other.value(offset), this->value(offset));
+        }
+      }
+    }
+
+    Group(Group &&other)
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        uint8_t status = other.m_status[offset];
+        m_status[offset] = status;
+        if (status == IS_SET) {
+          uninitialized_move_1(other.key(offset), this->key(offset));
+          uninitialized_move_1(other.value(offset), this->value(offset));
+        }
+      }
+    }
+
+    bool has_key(uint32_t offset, const KeyT &key) const
+    {
+      return m_status[offset] == IS_SET && key == *this->key(offset);
+    }
+
+    KeyT *key(uint32_t offset) const
+    {
+      return (KeyT *)(m_keys + offset * sizeof(KeyT));
+    }
+
+    ValueT *value(uint32_t offset) const
+    {
+      return (ValueT *)(m_values + offset * sizeof(ValueT));
+    }
+
+    uint8_t status(uint32_t offset) const
+    {
+      return m_status[offset];
+    }
+
+    void copy_in(uint32_t offset, const KeyT &key, const ValueT &value)
+    {
+      assert(m_status[offset] != IS_SET);
+      m_status[offset] = IS_SET;
+      uninitialized_copy_1(&key, this->key(offset));
+      uninitialized_copy_1(&value, this->value(offset));
+    }
+
+    void move_in(uint32_t offset, KeyT &key, ValueT &value)
+    {
+      assert(m_status[offset] != IS_SET);
+      m_status[offset] = IS_SET;
+      uninitialized_move_1(&key, this->key(offset));
+      uninitialized_move_1(&value, this->value(offset));
+    }
+
+    void set_dummy(uint32_t offset)
+    {
+      assert(m_status[offset] == IS_SET);
+      m_status[offset] = IS_DUMMY;
+      this->key(offset)->~KeyT();
+      this->value(offset)->~ValueT();
+    }
   };
+
+  GroupedOpenAddressingArray<Group> m_array;
+
+ public:
+  Map() = default;
+
+  // clang-format off
+
+#define ITER_SLOTS_BEGIN(KEY, ARRAY, OPTIONAL_CONST, R_GROUP, R_OFFSET) \
+  uint32_t hash = MyHash<KeyT>{}(KEY); \
+  uint32_t perturb = hash; \
+  while (true) { \
+    uint32_t group_index = (hash & ARRAY.slot_mask()) >> 2; \
+    uint8_t R_OFFSET = hash & OFFSET_MASK; \
+    uint8_t initial_offset = R_OFFSET; \
+    OPTIONAL_CONST Group &R_GROUP = ARRAY.group(group_index); \
+    do {
+
+#define ITER_SLOTS_END(R_OFFSET) \
+      R_OFFSET = (R_OFFSET + 1) & OFFSET_MASK; \
+    } while (R_OFFSET != initial_offset); \
+    perturb >>= 5; \
+    hash = hash * 5 + 1 + perturb; \
+  } ((void)0)
+
+  // clang-format on
+
+  void add_new(const KeyT &key, const ValueT &value)
+  {
+    assert(!this->contains(key));
+    this->ensure_can_add();
+
+    ITER_SLOTS_BEGIN (key, m_array, , group, offset) {
+      if (group.status(offset) == IS_EMPTY) {
+        group.copy_in(offset, key, value);
+        m_array.update__empty_to_set();
+        return;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  bool add(const KeyT &key, const ValueT &value)
+  {
+    this->ensure_can_add();
+
+    ITER_SLOTS_BEGIN (key, m_array, , group, offset) {
+      if (group.status(offset) == IS_EMPTY) {
+        group.copy_in(offset, key, value);
+        m_array.update__empty_to_set();
+        return true;
+      }
+      else if (group.has_key(offset, key)) {
+        return false;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  void remove(const KeyT &key)
+  {
+    assert(this->contains(key));
+    ITER_SLOTS_BEGIN (key, m_array, , group, offset) {
+      if (group.has_key(offset, key)) {
+        group.set_dummy(offset);
+        m_array.update__set_to_dummy();
+        return;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  bool contains(const KeyT &key) const
+  {
+    ITER_SLOTS_BEGIN (key, m_array, const, group, offset) {
+      if (group.status(offset) == IS_EMPTY) {
+        return false;
+      }
+      else if (group.has_key(offset, key)) {
+        return true;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  void print_table() const
+  {
+    std::cout << "Hash Table:\n";
+    std::cout << "  Size: " << m_array.slots_set() << '\n';
+    std::cout << "  Capacity: " << m_array.slots_total() << '\n';
+    uint32_t group_index = 0;
+    for (const Group &group : m_array) {
+      std::cout << "   Group: " << group_index++ << '\n';
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        std::cout << "    " << offset << " \t";
+        uint8_t status = group.status(offset);
+        if (status == IS_EMPTY) {
+          std::cout << "    <empty>\n";
+        }
+        else if (status == IS_SET) {
+          const KeyT &key = *group.key(offset);
+          const ValueT &value = *group.value(offset);
+          uint32_t collisions = this->count_collisions(value);
+          std::cout << "    " << key << " -> " << value << "  \t Collisions: " << collisions
+                    << '\n';
+        }
+        else if (status == IS_DUMMY) {
+          std::cout << "    <dummy>\n";
+        }
+      }
+    }
+  }
+
+ private:
+  uint32_t count_collisions(const KeyT &key) const
+  {
+    uint32_t collisions = 0;
+    ITER_SLOTS_BEGIN (key, m_array, const, group, offset) {
+      if (group.status(offset) == IS_EMPTY || group.has_key(offset, key)) {
+        return collisions;
+      }
+      collisions++;
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  void ensure_can_add()
+  {
+    if (m_array.should_grow()) {
+      this->grow();
+    }
+  }
+
+  void grow()
+  {
+    GroupedOpenAddressingArray<Group> new_array = m_array.init_grown();
+    for (Group &old_group : m_array) {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        if (old_group.status(offset) == IS_SET) {
+          this->add_after_grow(*old_group.key(offset), *old_group.value(offset), new_array);
+        }
+      }
+    }
+    m_array = std::move(new_array);
+  }
+
+  void add_after_grow(KeyT &key, ValueT &value, GroupedOpenAddressingArray<Group> &new_array)
+  {
+    ITER_SLOTS_BEGIN (key, new_array, , group, offset) {
+      if (group.status(offset) == IS_EMPTY) {
+        group.move_in(offset, key, value);
+        return;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+#undef ITER_SLOTS_BEGIN
+#undef ITER_SLOTS_END
 };
 
 int main()
@@ -597,5 +857,12 @@ int main()
   auto other_set = std::move(test);
   other_set.print_table();
   test.print_table();
+
+  Map<std::string, std::string> mymap;
+  for (int i = 0; i < 100; i++) {
+    mymap.add_new("Key: " + std::to_string(i), "Value: " + std::to_string(i));
+  }
+  mymap.remove("Key: 53");
+  mymap.print_table();
   return 0;
 }
