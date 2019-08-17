@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <array>
 #include <cassert>
 #include <stdint.h>
 
@@ -832,6 +833,102 @@ template<typename KeyT, typename ValueT> class Map {
 
 #undef ITER_SLOTS_BEGIN
 #undef ITER_SLOTS_END
+};
+
+template<typename T> struct PointerKeyInfo {
+  static T *get_empty()
+  {
+    return nullptr;
+  }
+
+  static bool is_empty(T *ptr)
+  {
+    return ptr == nullptr;
+  }
+
+  static bool is_set(T *ptr)
+  {
+    return ptr > 1;
+  }
+};
+
+template<typename KeyT, typename ValueT, typename KeyInfo> class KeyInfoMap {
+ private:
+  class Group {
+   private:
+    std::array<KeyT, 4> m_keys;
+    char m_values[4 * sizeof(ValueT)];
+
+   public:
+    Group()
+        : m_keys({KeyInfo::get_empty(),
+                  KeyInfo::get_empty(),
+                  KeyInfo::get_empty(),
+                  KeyInfo::get_empty()})
+    {
+    }
+
+    Group(const Group &other)
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        KeyT &key = other.key(offset);
+        if (KeyInfo::is_set(key)) {
+          uninitialized_copy_1(other.value(offset), this->value(offset));
+        }
+        uninitialized_copy_1(&key, this->key(offset));
+      }
+    }
+
+    Group(Group &&other)
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        KeyT &key = other.key(offset);
+        if (KeyInfo::is_set(key)) {
+          uninitialized_move_1(other.value(offset), this->value(offset));
+        }
+        uninitialized_move_1(&key, this->key(offset));
+      }
+    }
+
+    bool is_empty(uint32_t offset) const
+    {
+      return KeyInfo::is_empty(this->key(offset));
+    }
+
+    bool is_set(uint32_t offset)
+    {
+      return KeyInfo::is_set(this->key(offset));
+    }
+
+    bool is_set_key(uint32_t offset, const KeyT &key)
+    {
+      return KeyInfo::is_set(key) && key == this->key(offset);
+    }
+
+    void move_in(uint32_t offset, KeyT &key, ValueT &value)
+    {
+      assert(!this->is_set(offset));
+      this->key(offset) = key;
+      uninitialized_move_1(&value, this->value(offset));
+    }
+
+    KeyT &key(uint32_t offset) const
+    {
+      return *(KeyT *)(m_keys + offset * sizeof(KeyT));
+    }
+
+    ValueT *value(uint32_t offset) const
+    {
+      return (ValueT *)(m_values + offset * sizeof(ValueT));
+    }
+  };
+
+  GroupedOpenAddressingArray<Group> m_array;
+
+ public:
+  KeyInfoMap() = default;
+
+ private:
 };
 
 int main()
