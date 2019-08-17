@@ -491,9 +491,12 @@ int main()
   std::cout << "Start" << std::endl;
   Set<int> myset;
   for (int i = 0; i < 200; i++) {
-    myset.add_new(i);
+    myset.add(i);
   }
- // myset.print_table();
+  for (int i = 100; i < 300; i++) {
+    myset.add(i);
+  }
+  // myset.print_table();
   std::cout << "End\n";
   std::cout << myset.size() << '\n';
 }
