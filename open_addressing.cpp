@@ -1,6 +1,7 @@
 #include <iostream>
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <cassert>
 #include <stdint.h>
 
@@ -41,6 +42,18 @@ template<> class MyHash<int> {
   uint32_t operator()(int value)
   {
     return (uint32_t)value;
+  }
+};
+
+template<> class MyHash<std::string> {
+ public:
+  uint32_t operator()(const std::string &value)
+  {
+    uint32_t hash = 1331;
+    for (char c : value) {
+      hash = hash * 33 + c;
+    }
+    return hash;
   }
 };
 
@@ -107,7 +120,7 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
     }
 
     for (uint32_t i = 0; i < m_group_amount; i++) {
-      m_groups[i].init_empty();
+      new (m_groups + i) SlotGroup();
     }
   }
 
@@ -287,19 +300,47 @@ template<typename T> class Set {
   static constexpr uint8_t IS_SET = 1;
   static constexpr uint8_t IS_DUMMY = 2;
 
-  struct Group {
-    static constexpr uint32_t slots_per_group = 4;
-
+  class Group {
+   private:
     uint8_t m_status[4];
     char m_values[4 * sizeof(T)];
 
-    void init_empty()
+   public:
+    static constexpr uint32_t slots_per_group = 4;
+
+    Group()
     {
       m_status[0] = IS_EMPTY;
       m_status[1] = IS_EMPTY;
       m_status[2] = IS_EMPTY;
       m_status[3] = IS_EMPTY;
     }
+
+    Group(const Group &other)
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        uint8_t status = other.m_status[offset];
+        m_status[offset] = status;
+        if (status == IS_SET) {
+          std::uninitialized_copy_n(other.value(offset), 1, this->value(offset));
+        }
+      }
+    }
+
+    Group(Group &&other)
+    {
+      for (uint32_t offset = 0; offset < 4; offset++) {
+        uint8_t status = other.m_status[offset];
+        m_status[offset] = status;
+        if (status == IS_SET) {
+          std::uninitialized_copy_n(
+              std::make_move_iterator(other.value(offset)), 1, this->value(offset));
+        }
+      }
+    }
+
+    Group &operator=(const Group &other) = delete;
+    Group &operator=(Group &&other) = delete;
 
     const uint8_t &status(uint32_t offset) const
     {
@@ -503,21 +544,10 @@ template<typename T> class Set {
   {
     uint32_t collisions = 0;
     ITER_SLOTS_BEGIN (value, m_array, const, group, offset) {
-      uint8_t status = group.status(offset);
-      if (status == IS_EMPTY) {
+      if (group.status(offset) == IS_EMPTY || group.has_value(offset, value)) {
         return collisions;
       }
-      else if (status == IS_SET) {
-        if (group.has_value(offset, value)) {
-          return collisions;
-        }
-        else {
-          collisions++;
-        }
-      }
-      else {
-        assert(false);
-      }
+      collisions++;
     }
     ITER_SLOTS_END(offset);
   }
@@ -526,21 +556,40 @@ template<typename T> class Set {
 #undef ITER_SLOTS_END
 };
 
+template<typename KeyT, typename ValueT> class Map {
+ private:
+  static constexpr uint32_t OFFSET_MASK = 3;
+  static constexpr uint8_t IS_EMPTY = 0;
+  static constexpr uint8_t IS_SET = 1;
+  static constexpr uint8_t IS_DUMMY = 2;
+
+  class Group {
+   private:
+    uint8_t m_status[4];
+    char m_keys[4 * sizeof(KeyT)];
+    char m_values[4 * sizeof(ValueT)];
+
+   public:
+    static constexpr uint32_t slots_per_group = 4;
+  };
+};
+
 int main()
 {
   std::cout << "Start" << std::endl;
-  Set<int> myset;
+  Set<std::string> myset;
   for (int i = 0; i < 200; i++) {
-    myset.add(i);
+    myset.add(std::to_string(i) + " 12345678901234567890");
   }
   for (int i = 100; i < 300; i++) {
-    myset.add(i);
+    myset.add(std::to_string(i) + " 12345678901234567890");
   }
   for (int i = 50; i < 120; i++) {
-    myset.remove(i);
+    myset.remove(std::to_string(i) + " 12345678901234567890");
   }
 
   myset.print_table();
   std::cout << "End\n";
   std::cout << myset.size() << '\n';
+  return 0;
 }
