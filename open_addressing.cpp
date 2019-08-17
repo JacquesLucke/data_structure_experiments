@@ -384,7 +384,7 @@ template<typename T> class Set {
     }
   };
 
-  GroupedOpenAddressingArray<Group> m_array = GroupedOpenAddressingArray<Group>(1);
+  GroupedOpenAddressingArray<Group> m_array = GroupedOpenAddressingArray<Group>();
 
  public:
   Set() = default;
@@ -588,8 +588,14 @@ int main()
     myset.remove(std::to_string(i) + " 12345678901234567890");
   }
 
-  myset.print_table();
+  // myset.print_table();
   std::cout << "End\n";
   std::cout << myset.size() << '\n';
+
+  Set<int> test;
+  test.add(1);
+  auto other_set = std::move(test);
+  other_set.print_table();
+  test.print_table();
   return 0;
 }
