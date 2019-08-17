@@ -6,3 +6,5 @@ Makefile
 CMakeCache.txt
 run_tests
 build
+*.exe
+*.obj
