@@ -184,7 +184,9 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
 
   GroupedOpenAddressingArray init_grown() const
   {
-    return GroupedOpenAddressingArray(m_group_exponent + 1);
+    GroupedOpenAddressingArray grown(m_group_exponent + 1);
+    grown.m_slots_set = m_slots_set;
+    return grown;
   }
 
   uint32_t slots_total() const
@@ -242,6 +244,16 @@ template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpe
     return m_groups + m_group_amount;
   }
 
+  const SlotGroup *begin() const
+  {
+    return m_groups;
+  }
+
+  const SlotGroup *end() const
+  {
+    return m_groups + m_group_amount;
+  }
+
  private:
   SlotGroup *small_storage() const
   {
@@ -259,6 +271,7 @@ template<typename T> class Set {
   static constexpr uint32_t OFFSET_MASK = 3;
   static constexpr uint8_t IS_EMPTY = 0;
   static constexpr uint8_t IS_SET = 1;
+  static constexpr uint8_t IS_DUMMY = 2;
 
   struct Group {
     static constexpr uint32_t slots_per_group = 4;
@@ -268,10 +281,10 @@ template<typename T> class Set {
 
     void init_empty()
     {
-      m_status[0] = 0;
-      m_status[1] = 0;
-      m_status[2] = 0;
-      m_status[3] = 0;
+      m_status[0] = IS_EMPTY;
+      m_status[1] = IS_EMPTY;
+      m_status[2] = IS_EMPTY;
+      m_status[3] = IS_EMPTY;
     }
 
     const uint8_t &status(uint32_t offset) const
@@ -287,6 +300,18 @@ template<typename T> class Set {
     T *value(uint32_t offset) const
     {
       return (T *)(m_values + offset * sizeof(T));
+    }
+
+    void set_value(uint32_t offset, const T &value)
+    {
+      assert(m_status[offset] != IS_SET);
+      m_status[offset] = IS_SET;
+      std::uninitialized_copy_n(&value, 1, this->value(offset));
+    }
+
+    bool has_value(uint32_t offset, const T &value) const
+    {
+      return m_status[offset] == IS_SET && *this->value(offset) == value;
     }
   };
 
@@ -322,12 +347,28 @@ template<typename T> class Set {
     this->ensure_can_add();
 
     ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
-      uint8_t &status = group.status(offset);
-      if (status == IS_EMPTY) {
-        status = IS_SET;
-        std::uninitialized_copy_n(&value, 1, group.value(offset));
+      if (group.status(offset) == IS_EMPTY) {
+        group.set_value(offset, value);
         m_array.slots_set()++;
         return;
+      }
+    }
+    ITER_SLOTS_END(offset);
+  }
+
+  bool add(const T &value)
+  {
+    this->ensure_can_add();
+
+    ITER_SLOTS_BEGIN (value, m_array, , group, offset) {
+      uint8_t status = group.status(offset);
+      if (status == IS_EMPTY) {
+        group.set_value(offset, value);
+        m_array.slots_set()++;
+        return true;
+      }
+      else if (group.has_value(offset, value)) {
+        return false;
       }
     }
     ITER_SLOTS_END(offset);
@@ -340,7 +381,7 @@ template<typename T> class Set {
       if (status == IS_EMPTY) {
         return false;
       }
-      else if (status == IS_SET && *group.value(offset) == value) {
+      else if (group.has_value(offset, value)) {
         return true;
       }
     }
@@ -357,9 +398,9 @@ template<typename T> class Set {
     std::cout << "Hash Table:\n";
     std::cout << "  Size: " << m_array.slots_set() << '\n';
     std::cout << "  Capacity: " << m_array.slots_total() << '\n';
-    for (uint32_t group_index = 0; group_index < m_array.group_amount(); group_index++) {
-      const Group &group = m_array.group(group_index);
-      std::cout << "   Group: " << group_index << '\n';
+    uint32_t group_index = 0;
+    for (const Group &group : m_array) {
+      std::cout << "   Group: " << group_index++ << '\n';
       for (uint32_t offset = 0; offset < 4; offset++) {
         std::cout << "    " << offset << " \t";
         uint8_t status = group.status(offset);
@@ -450,8 +491,9 @@ int main()
   std::cout << "Start" << std::endl;
   Set<int> myset;
   for (int i = 0; i < 200; i++) {
-    myset.add_new(i * 8);
+    myset.add_new(i);
   }
-  myset.print_table();
+ // myset.print_table();
   std::cout << "End\n";
+  std::cout << myset.size() << '\n';
 }
