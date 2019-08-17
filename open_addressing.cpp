@@ -76,34 +76,33 @@ uint32_t prime_numbers[] = {
     131071,   262139,   524287,    1048573,   2097143,   4194301,    8388593,    16777213,
     33554393, 67108859, 134217689, 268435399, 536870912, 1073741789, 2147483647, 4294967291};
 
-template<typename SlotGroup> class GroupedOpenAddressingArray {
+template<typename SlotGroup, uint32_t GroupsInSmallStorage = 1> class GroupedOpenAddressingArray {
  private:
+  static constexpr auto slots_per_group = SlotGroup::slots_per_group;
+
   SlotGroup *m_groups;
   uint32_t m_group_amount;
-  int8_t m_group_exponent;
+  uint8_t m_group_exponent;
   uint32_t m_slots_total;
   uint32_t m_slots_set;
   uint32_t m_slot_mask;
+  char m_local_storage[sizeof(SlotGroup) * GroupsInSmallStorage];
 
  public:
-  explicit GroupedOpenAddressingArray(int8_t group_exponent = -1)
+  explicit GroupedOpenAddressingArray(uint8_t group_exponent = 0)
   {
-    if (group_exponent == -1) {
-      m_slots_total = 0;
-      m_slots_set = 0;
-      m_slot_mask = 0;
-      m_group_amount = 0;
-      m_group_exponent = -1;
-      m_groups = nullptr;
-      return;
-    }
-
-    m_slots_total = (1 << group_exponent) * SlotGroup::slots_per_group;
+    m_slots_total = (1 << group_exponent) * slots_per_group;
     m_slots_set = 0;
     m_slot_mask = m_slots_total - 1;
-    m_group_amount = m_slots_total / SlotGroup::slots_per_group;
+    m_group_amount = m_slots_total / slots_per_group;
     m_group_exponent = group_exponent;
-    m_groups = reinterpret_cast<SlotGroup *>(malloc(m_group_amount * sizeof(SlotGroup)));
+
+    if (m_group_amount <= GroupsInSmallStorage) {
+      m_groups = this->small_storage();
+    }
+    else {
+      m_groups = reinterpret_cast<SlotGroup *>(malloc(m_group_amount * sizeof(SlotGroup)));
+    }
 
     for (uint32_t i = 0; i < m_group_amount; i++) {
       m_groups[i].init_empty();
@@ -113,7 +112,12 @@ template<typename SlotGroup> class GroupedOpenAddressingArray {
   ~GroupedOpenAddressingArray()
   {
     if (m_groups != nullptr) {
-      free(static_cast<void *>(m_groups));
+      for (uint32_t i = 0; i < m_group_amount; i++) {
+        m_groups[i].~SlotGroup();
+      }
+      if (!this->is_in_small_storage()) {
+        free(static_cast<void *>(m_groups));
+      }
     }
   }
 
@@ -124,7 +128,13 @@ template<typename SlotGroup> class GroupedOpenAddressingArray {
     m_slot_mask = other.m_slot_mask;
     m_group_amount = other.m_group_amount;
     m_group_exponent = other.m_group_exponent;
-    m_groups = static_cast<SlotGroup *>(malloc(m_group_amount * sizeof(SlotGroup)));
+
+    if (m_group_amount <= GroupsInSmallStorage) {
+      m_groups = this->small_storage();
+    }
+    else {
+      m_groups = static_cast<SlotGroup *>(malloc(m_group_amount * sizeof(SlotGroup)));
+    }
 
     std::uninitialized_copy_n(other.m_groups, m_group_amount, m_groups);
   }
@@ -136,14 +146,20 @@ template<typename SlotGroup> class GroupedOpenAddressingArray {
     m_slot_mask = other.m_slot_mask;
     m_group_amount = other.m_group_amount;
     m_group_exponent = other.m_group_exponent;
-    m_groups = other.m_groups;
+    if (other.is_in_small_storage()) {
+      m_groups = this->small_storage();
+      std::uninitialized_copy_n(std::make_move_iterator(other.m_groups), m_group_amount, m_groups);
+      for (uint32_t i = 0; i < other.m_group_amount; i++) {
+        other.m_groups[i].~SlotGroup();
+      }
+    }
+    else {
+      m_groups = other.m_groups;
+    }
 
-    other.m_slots_total = 0;
-    other.m_slots_set = 0;
-    other.m_slot_mask = 0;
-    other.m_group_amount = 0;
-    other.m_group_exponent = -1;
     other.m_groups = nullptr;
+    other.~GroupedOpenAddressingArray();
+    new (&other) GroupedOpenAddressingArray();
   }
 
   GroupedOpenAddressingArray &operator=(const GroupedOpenAddressingArray &other)
@@ -196,7 +212,7 @@ template<typename SlotGroup> class GroupedOpenAddressingArray {
     return m_groups[group_index];
   }
 
-  int8_t group_exponent() const
+  uint8_t group_exponent() const
   {
     return m_group_exponent;
   }
@@ -209,6 +225,17 @@ template<typename SlotGroup> class GroupedOpenAddressingArray {
   bool should_grow() const
   {
     return m_slots_set >= m_slots_total / 2;
+  }
+
+ private:
+  SlotGroup *small_storage() const
+  {
+    return reinterpret_cast<SlotGroup *>((char *)m_local_storage);
+  }
+
+  bool is_in_small_storage() const
+  {
+    return m_groups == this->small_storage();
   }
 };
 
@@ -349,8 +376,8 @@ template<typename T> class Set {
   void grow()
   {
     std::cout << "Grow at " << m_array.slots_set() << '/' << m_array.slots_total() << '\n';
-    int8_t old_exponent = m_array.group_exponent();
-    int8_t new_exponent = old_exponent + 1;
+    uint8_t old_exponent = m_array.group_exponent();
+    uint8_t new_exponent = old_exponent + 1;
 
     GroupedOpenAddressingArray<Group> new_array(new_exponent);
 
